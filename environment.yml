@@ -1,0 +1,105 @@
+# Conda environment for neural-decoding-infra (cluster-side lock file)
+#
+# Two-step install (conda core + pip extras):
+#   1. conda env create -f environment.yml
+#   2. conda activate recon && pip install -e ".[all]"
+#
+# Why two steps?
+#   - conda is best for heavy ML stack with C extensions (torch, mne, nibabel)
+#     that have complex CUDA / system library dependencies.
+#   - pip is best for our own package + Python-only extras (brainomni, vllm).
+#   - This follows the convention of every major AI project (HuggingFace,
+#     PyTorch Lightning, etc.).
+#
+# For local dev, use pyproject.toml + `pip install -e ".[brainomni]"`
+# instead — see docs/standards/07-dependencies.md.
+#
+# Migration from older envs:
+#   - If you have `reconstruction` env: clone it and add `[all]`
+#   - If you have `brainomni` env: it is now folded into `recon[all]`
+
+name: recon
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  # ───────────────────── Core Python ─────────────────────
+  - python=3.10
+  - pip
+  - wheel
+  - setuptools
+
+  # ───────────────────── Scientific stack ─────────────────────
+  - numpy>=1.24
+  - scipy>=1.10
+  - pandas
+  - scikit-learn
+  - matplotlib
+
+  # ───────────────────── PyTorch (CUDA 12.x) ─────────────────────
+  # Pin to match cluster CUDA driver (12.4). Adjust if driver changes.
+  - pytorch>=2.0,<2.5
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.4
+
+  # ───────────────────── NLP / transformers (core) ─────────────────────
+  # BrainOmni and large-LM extras are pip-installed below.
+  - transformers>=4.30
+  - tokenizers
+  - sentencepiece
+
+  # ───────────────────── Data loading ─────────────────────
+  - h5py
+  - pyarrow
+
+  # ───────────────────── Imaging / signal ─────────────────────
+  - nibabel>=5.0
+  - nilearn
+  - mne>=1.0
+
+  # ───────────────────── Config / orchestration ─────────────────────
+  - hydra-core>=1.3
+  - omegaconf>=2.3
+
+  # ───────────────────── Validation / schemas ─────────────────────
+  - pydantic>=2.5
+
+  # ───────────────────── Tracking / logging ─────────────────────
+  - wandb>=0.15
+
+  # ───────────────────── Dev / test / lint (cluster-side) ─────────────────────
+  - pytest>=7.4
+  - pytest-cov
+  - pytest-mock
+  - ruff
+  - mypy
+  - ipython
+  - ipdb
+  - pre-commit
+
+  # ───────────────────── Misc ─────────────────────
+  - tqdm
+  - pyyaml
+  - python-dotenv
+  - requests
+
+  # ───────────────────── Pip section: install recon + all extras ─────────────────────
+  # IMPORTANT: pip must be in the env (above) for this to work.
+  # After `conda env create -f environment.yml`, also run:
+  #     conda activate recon
+  #     pip install -e ".[all]"
+  # Or use the Makefile target:
+  #     make install-dev
+  - pip:
+      # Install the package itself + all extras in editable mode
+      - --editable=.
+      # All extras (brainomni, large-lm, data-public) declared in
+      # pyproject.toml are pulled in via ".[all]".
+      # The actual `pip install -e ".[all]"` command should be run
+      # AFTER conda env create (see Makefile target).
+      # We do NOT do it here because pip in conda env files has
+      # restrictions on relative paths and editable installs.

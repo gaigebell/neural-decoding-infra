@@ -1,0 +1,65 @@
+# Pre-commit hooks for neural-decoding-infra
+#
+# Install: pip install pre-commit && pre-commit install
+# Run on demand: pre-commit run --all-files
+
+repos:
+  # ───────────────────── Ruff (lint + format) ─────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^recon/|^tests/
+      - id: ruff-format
+        files: ^recon/|^tests/
+
+  # ───────────────────── Mypy (type check) ─────────────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        files: ^recon/
+        additional_dependencies: [pydantic>=2.5]
+        args: [--ignore-missing-imports]
+
+  # ───────────────────── General hygiene ─────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+        files: \.(yaml|yml)$
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]  # refuse to commit files > 1 MB
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch=main]
+        # Don't commit directly to main; use a feature branch
+
+  # ───────────────────── Markdown ─────────────────────
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.39.0
+    hooks:
+      - id: markdownlint
+        args: ["--config", ".markdownlint.json"]
+        files: \.md$
+
+  # ───────────────────── Shell scripts ─────────────────────
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        files: ^scripts/.*\.sh$
+
+  # ───────────────────── Conventional Commits ─────────────────────
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.0.0
+    hooks:
+      - id: conventional
+        stages: [commit-msg]
