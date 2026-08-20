@@ -115,22 +115,18 @@ def _register_builtins() -> None:
     extras installed.
     """
     # ─────────────── Core models (always importable) ───────────────
-    # Add imports here as you create the model files. For now, this is
-    # a placeholder — actual fMRI/MEG model files will be added in
-    # subsequent PRs.
-
-    # from .fmri import fmri3dcib, fmri3dcib2, fmri_bnib, fmri_bnatt, fmri_catt
-    # from .meg import meg_model_a
+    # These imports trigger the @register_model decorators in each module.
+    from .fmri import fmri3dcib  # noqa: F401
+    from .meg import meg_model_a  # noqa: F401
 
     # ─────────────── Optional models (require extras) ───────────────
-    # These imports succeed regardless of whether the extra is installed,
-    # because the modules themselves use lazy imports internally. Only
-    # the *builder call* (build_model → builder()) will fail with a
-    # friendly ImportError if the extra is missing.
+    # BrainOmni-based models. The module file uses lazy imports, so
+    # importing it is always safe — only calling build_brainomni_* will
+    # require the extra.
     try:
-        from .brainomni import align_mlp  # noqa: F401
+        from . import brainomni  # noqa: F401
     except ImportError:
-        # Module file missing — that's OK during early bootstrap
+        # brainomni subpackage not created yet — that's OK
         pass
 
 

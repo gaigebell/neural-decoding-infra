@@ -1,0 +1,9 @@
+name: meg_model_a
+n_channels: 306
+n_context: 5
+embed_dim: 256
+gru_hidden: 256
+gru_layers: 2
+n_heads: 4
+semantic_dim: 768
+dropout: 0.1

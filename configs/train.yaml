@@ -1,0 +1,50 @@
+# Default training config — the entry point for `python -m recon.cli.train`.
+#
+# Compose with overrides:
+#   python -m recon.cli.train model=fmri3dcib data=fake train.smoke=true
+#
+# See docs/standards/05-configuration.md for naming and structure.
+
+defaults:
+  - model: fmri3dcib
+  - data: drdr
+  - paths: cluster
+  - _self_
+
+# Training hyperparameters
+train:
+  epochs: 100
+  batch_size: 8
+  grad_clip: 1.0
+  amp: true                # automatic mixed precision (bf16/fp16)
+  num_workers: 2
+  pin_memory: true
+  optimizer: adamw          # adamw, adam, sgd
+  lr: 1.0e-4
+  weight_decay: 0.01
+  scheduler: cosine         # cosine, step, constant
+  warmup_steps: 100
+  log_interval: 10
+  save_interval: 10
+  eval_interval: 5
+  seed: 42
+  smoke: false             # smoke mode: 1 epoch, fake data
+  max_steps_per_epoch: null # set to int for smoke
+
+# Evaluation
+eval:
+  interval: 5
+  metrics: [crr, cer]
+
+# Checkpointing
+ckpt:
+  dir: ${paths.results_dir}/ckpt/${run_id}
+  keep_last_n: 3
+
+# Logging
+logging:
+  wandb_project: neural-decoding-infra
+  log_interval: 10
+
+# Run identifier (used in ckpt paths, wandb name, etc.)
+run_id: ${now:%Y-%m-%d_%H-%M-%S}

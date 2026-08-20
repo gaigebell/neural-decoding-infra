@@ -32,17 +32,33 @@ python -m recon.cli.train \
     --config-path=configs \
     paths=cluster \
     model=fmri3dcib \
-    data=drdr \
+    data=drdr_fmri \
     train.smoke=true
 
-# Real training (single subject)
+# Real training (single subject, fMRI)
 python -m recon.cli.train \
     paths=cluster \
     model=fmri3dcib \
+    data=drdr_fmri \
+    data.subjects=[1] \
+    train.epochs=100 \
+    train.batch_size=32
+
+# Real training (single subject, MEG)
+python -m recon.cli.train \
+    paths=cluster \
+    model=meg_model_a \
     data=drdr \
     data.subjects=[1] \
     train.epochs=100 \
     train.batch_size=32
+```
+
+> **Modality pairing**: `model=fmri3dcib` pairs with `data=drdr_fmri`
+> (cube volumes + mask); `model=meg_model_a` pairs with `data=drdr`
+> (context-windowed MEG). Real-data smoke runs verified 2026-08-16 on the
+> owner's dev machine (CPU): MEG 3 stories / 12 samples → loss 1.20,
+> fMRI 1 story / 2 steps → loss 0.71.
 ```
 
 ## What you'll see
@@ -108,7 +124,7 @@ tail -f logs/run_*.log
 | Artifact | Location |
 |---|---|
 | Logs | stdout + W&B run |
-| Checkpoints | `${paths.results_root}/ckpt/<run_id>/` |
+| Checkpoints | `${paths.results_dir}/ckpt/<run_id>/` |
 | Final metrics | W&B run summary |
 | Config snapshot | W&B run config + local `results/<run_id>/config.yaml` |
 

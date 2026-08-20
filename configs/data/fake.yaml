@@ -1,0 +1,4 @@
+name: fake
+modality: meg        # meg or fmri
+n_context: 5         # for chunked MEG
+n_samples: 64

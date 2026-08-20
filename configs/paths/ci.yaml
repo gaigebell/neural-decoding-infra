@@ -1,0 +1,10 @@
+# CI / smoke-test paths (no real data, no GPU)
+# Override with: python -m recon.cli.train paths=ci
+
+data_root: null
+processed_root: null
+results_dir: ./tests/tmp_results
+pretrained_root: null
+
+gpt_path: null
+brainomni_path: null

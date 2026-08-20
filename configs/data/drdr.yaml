@@ -1,0 +1,8 @@
+name: drdr
+modality: meg
+subjects: null      # null = all available; list = filter
+stories: null       # null = all available; list = filter
+n_context: 5        # >0: context-window files + alignment shift; 0: plain (T, C)
+layer: 10           # GPT-2 layer
+weights: [0.1, 0.7, 0.5, 0.3]   # delay weights (original pipeline)
+max_stories: 60

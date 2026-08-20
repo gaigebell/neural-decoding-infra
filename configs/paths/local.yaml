@@ -1,0 +1,10 @@
+# Local dev machine paths (e.g., owner's RTX 4060)
+# Override with: python -m recon.cli.train paths=local
+
+data_root: E:/reconstruction          # raw BIDS data (mydata/)
+processed_root: E:/results            # preprocessed results (MEG/zresp, zresp/cube, ...)
+results_dir: ./tests/tmp_results
+pretrained_root: ./tests/fake_pretrained
+
+gpt_path: ${paths.pretrained_root}/fake_gpt
+brainomni_path: ${paths.pretrained_root}/fake_brainomni

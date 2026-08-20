@@ -1,0 +1,6 @@
+name: fmri3dcib
+input_shape: [91, 109, 91]   # real cube shape (mask.nii); backbone ends in AdaptiveMaxPool3d so any shape works
+semantic_dim: 768
+backbone_dim: 1000
+bottleneck_dim: 256
+beta: 0.001
