@@ -487,18 +487,22 @@ class Trainer:
             brain_x = batch.brain.x.to(self.device)
             stim_zstim = batch.stim.zstim.to(self.device)
 
-            # Forward
-            if self.amp_enabled:
-                with torch.cuda.amp.autocast():
-                    pred, aux_loss = self._model_forward(brain_x)
-            else:
-                pred, aux_loss = self._model_forward(brain_x)
-
+            # Forward. The loss is computed INSIDE the autocast context:
+            # model outputs are fp16 under AMP, and mixing them with the
+            # fp32 target outside autocast breaks backward ("Found dtype
+            # Float but expected Half").
             # stim.zstim may hold several concatenated delays (e.g. 4 × 768
             # = 3072); models predict the first delay's embedding
             # (semantic_dim = pred.shape[-1]), so slice the target.
-            target = stim_zstim[..., : pred.shape[-1]]
-            loss, loss_dict = self._model_compute_loss(pred, target, aux_loss)
+            if self.amp_enabled:
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    pred, aux_loss = self._model_forward(brain_x)
+                    target = stim_zstim[..., : pred.shape[-1]]
+                    loss, loss_dict = self._model_compute_loss(pred, target, aux_loss)
+            else:
+                pred, aux_loss = self._model_forward(brain_x)
+                target = stim_zstim[..., : pred.shape[-1]]
+                loss, loss_dict = self._model_compute_loss(pred, target, aux_loss)
 
             # Backward
             self.optimizer.zero_grad()

@@ -58,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **AMP dtype bug (GPU)**: the trainer computed the loss OUTSIDE the
+  autocast context, mixing fp16 model outputs with the fp32 target
+  ("Found dtype Float but expected Half" on the fMRI IB model). Loss is
+  now computed inside `torch.amp.autocast("cuda")` (also removes the
+  deprecated `torch.cuda.amp.autocast` API).
+- **GPU verification (2026-08-20, owner dev machine, RTX 4060 Laptop,
+  torch 2.6.0+cu124)**: MEG training 0.4 s/epoch, fMRI training (AMP, IB)
+  1.6 s for 4 steps, GPU decode 30 valid Chinese chars, 107 tests pass.
+  Torch version pinned to 2.6.0 to align with the cluster (CentOS 7 +
+  Pascal PH402 → cu118/cu124 wheel constraints).
 - `BrainStimPair` discriminated union: replaced invalid
   `discriminator="__class__.__name__"` with per-class `modality: Literal[...]`
   fields + `discriminator="modality"` (pydantic v2 requirement).
