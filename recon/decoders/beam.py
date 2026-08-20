@@ -1,31 +1,38 @@
-"""Batched beam search decoder for Chinese character generation.
+"""Beam search decoder for Chinese character generation.
 
-This is the critical **60× speedup** over the original single-character
-per-forward implementation. Key optimizations:
+Faithful port of the original decoding loop (``2026-7-22/run_decoder.py`` +
+``decode/Decoder.py`` + ``decode/StimulusModel.py``), simplified:
 
-1. **Batched brain encoding**: Run the brain encoder ONCE over the entire
-   story, producing (T, 768) semantic predictions.
-2. **GPT-2 KV cache**: Reuse attention key/value tensors across decoding
-   steps so we don't recompute from scratch each time.
-3. **Vectorized beam scoring**: For each beam, compute cosine similarity
-   to all candidates in a single batched matmul.
-4. **Nucleus sampling for diversity**: Sample top-p tokens from the LM
-   instead of greedy argmax.
+- **Batched brain encoding**: the brain model runs once over the whole
+  story, producing (T, 768) semantic predictions — instead of re-running
+  it per beam extension (the original's biggest cost).
+- **Contextualized candidate features**: each candidate character is
+  embedded by the GPT-2 hidden state at ``select_layer`` (default 10,
+  same as the stimulus features), conditioned on the previous
+  ``context_words`` characters — matching the original ``LMFeatures``.
+- **Proper beam**: ``beam_width`` hypotheses are maintained; per step each
+  hypothesis proposes ``extensions`` nucleus-sampled characters; the global
+  pool is pruned to the top ``beam_width`` by combined score
+  ``logprob + sim_ratio * cosine_sim``.
+- **Constant-size LM context**: each step forwards the LM only over the
+  last ``context_words + 1`` characters (batched across all candidates),
+  so per-step cost does not grow with story length. (KV-cache reuse is a
+  planned optimization, not implemented yet.)
 
-Target performance: ~30 seconds for a ~1000-character story (vs ~30 minutes
-for the original implementation).
+Deliberate simplifications vs the original:
+
+- No word-rate (WR) model: the original downsampled word-level stimulus
+  features to TRs via a lanczos matrix and decoded word-by-word. Here the
+  per-step brain predictions align 1:1 with decoded characters (one char
+  per time step). Porting the WR model is planned (P2).
+- Combined score ``logprob + sim_ratio * cos`` instead of the original's
+  softmax-similarity ranking with separately accumulated logprobs.
 
 Usage:
     >>> from recon.decoders.beam import BeamSearchDecoder, DecodingConfig
-    >>> config = DecodingConfig(beam_width=200, lm_mass=0.9, max_chars=1000)
-    >>> decoder = BeamSearchDecoder(
-    ...     brain_encoder=model,
-    ...     gpt_model=gpt,
-    ...     gpt_tokenizer=tokenizer,
-    ...     config=config,
-    ... )
-    >>> text = decoder.decode(brain_signals)  # brain_signals: (T, C, time)
-    >>> print(text)
+    >>> config = DecodingConfig(beam_width=200, max_chars=1000)
+    >>> decoder = BeamSearchDecoder(brain_encoder, gpt_model, tokenizer, config)
+    >>> text = decoder.decode(brain_signals)
 """
 from __future__ import annotations
 
@@ -33,7 +40,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -41,8 +47,42 @@ from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover
+    def tqdm(iterable, **kwargs):
+        return iterable
 
-# ───────────────────── Configuration ─────────────────────
+
+# Cold-start candidates when the beam has no context yet.
+_COLD_START_CHARS = ["的", "是", "我", "你", "他", "一", "不", "了", "人", "在"]
+
+# Punctuation allowed as a single-character candidate (in addition to
+# Chinese characters and ASCII alphanumerics).
+_ALLOWED_PUNCT = set("，。！？、；：""''（）《》…—·")
+
+
+def _is_valid_char(s: str) -> bool:
+    """True if ``s`` is a single printable character worth proposing.
+
+    Excludes [UNK]/special tokens, whitespace, BPE continuation pieces
+    (they decode to multi-char or replacement-char garbage), and control
+    characters. This mirrors the original pipeline's restricted decode
+    vocabulary (``decode_vocab`` built from story characters / the GPT
+    vocab), which we rebuild here from the tokenizer itself.
+    """
+    if len(s) != 1:
+        return False
+    c = s[0]
+    if c in ("�", "[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]"):
+        return False
+    if "一" <= c <= "鿿":  # CJK unified ideograph
+        return True
+    if c.isascii() and (c.isalnum() or c in _ALLOWED_PUNCT):
+        return True
+    if c in _ALLOWED_PUNCT:
+        return True
+    return False
 
 
 @dataclass
@@ -50,12 +90,14 @@ class DecodingConfig:
     """Configuration for :class:`BeamSearchDecoder`."""
 
     beam_width: int = 200
-    extensions: int = 5  # candidates per beam per step
-    lm_mass: float = 0.9  # nucleus sampling mass
-    lm_ratio: float = 0.1
+    extensions: int = 5  # candidates proposed per hypothesis per step
+    lm_mass: float = 0.9  # nucleus sampling top-p mass
+    sim_ratio: float = 0.15  # weight of cosine sim vs LM logprob
     max_chars: int = 2000
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     semantic_dim: int = 768
+    select_layer: int = 10  # GPT-2 layer for candidate features
+    context_words: int = 5  # chars of left context for features
     log_interval: int = 50
 
 
@@ -65,30 +107,26 @@ class Hypothesis:
 
     words: list[str] = field(default_factory=list)  # characters
     logprobs: list[float] = field(default_factory=list)  # per-step log probs
-    embs: list[torch.Tensor] = field(default_factory=list)  # semantic vectors
-    score: float = 0.0  # cumulative score (sum of log probs + sim)
+    score: float = 0.0  # cumulative score (logprob + sim_ratio * cos)
 
-    def extend(self, char: str, logprob: float, emb: torch.Tensor) -> "Hypothesis":
+    def extend(self, char: str, logprob: float) -> "Hypothesis":
         return Hypothesis(
             words=self.words + [char],
             logprobs=self.logprobs + [logprob],
-            embs=self.embs + [emb],
             score=self.score + logprob,
         )
 
 
-# ───────────────────── Decoder ─────────────────────
-
-
 class BeamSearchDecoder:
-    """Batch beam-search decoder with GPT-2 KV cache.
+    """Beam-search decoder over GPT-2 semantic features.
 
     Args:
-        brain_encoder: Trained model (callable: brain_input -> semantic_vec).
-            Should be in eval mode.
-        gpt_model: A HuggingFace GPT-2 model (used for nucleus sampling
-            and embedding lookup).
-        gpt_tokenizer: Corresponding tokenizer.
+        brain_encoder: Trained model (callable: brain_input -> semantic
+            prediction (B, 768), possibly as a tuple). Eval mode is set.
+        gpt_model: A HuggingFace GPT-2 model (used for nucleus proposal
+            and layer-``select_layer`` feature extraction).
+        gpt_tokenizer: Corresponding tokenizer (must have a pad token;
+            ``[PAD]`` id 0 in the Chinese cluecorpus vocab).
         config: :class:`DecodingConfig`.
     """
 
@@ -104,8 +142,10 @@ class BeamSearchDecoder:
         self.tokenizer = gpt_tokenizer
         self.config = config or DecodingConfig()
         self.device = torch.device(self.config.device)
+        # Lazily built in _valid_token_mask(): bool mask over the vocab of
+        # tokens that decode to a single printable character.
+        self._valid_mask: torch.Tensor | None = None
 
-        # Move models to device
         if hasattr(self.brain_encoder, "to"):
             self.brain_encoder = self.brain_encoder.to(self.device)
         if hasattr(self.brain_encoder, "eval"):
@@ -125,174 +165,163 @@ class BeamSearchDecoder:
             brain_input: Brain signal tensor. Shape depends on the model:
                 - MEG chunked: (T, n_context, n_channels)
                 - fMRI: (T, X, Y, Z) or (T, 1, X, Y, Z)
-                - BrainOmni features: (T, n_neurons, n_dim)
 
         Returns:
-            Decoded string (concatenation of beam[0].words).
+            Decoded string (concatenation of the best beam hypothesis).
         """
         brain_input = brain_input.to(self.device)
 
-        # Step 1: Batched brain encoding
-        logger.info("Step 1: Batched brain encoding...")
+        logger.info("Step 1: batched brain encoding...")
         brain_features = self._encode_brain(brain_input)  # (T, 768)
-        T = brain_features.shape[0]
-        logger.info("  Encoded %d time steps, semantic dim=%d", T, brain_features.shape[-1])
+        n_steps = brain_features.shape[0]
+        logger.info("Encoded %d time steps, semantic dim=%d", n_steps, brain_features.shape[-1])
 
-        # Step 2: Initialize beam
         beam = [Hypothesis()]
-        prev_context = ""  # accumulated text for the LM context
+        for t in tqdm(range(min(n_steps, self.config.max_chars)), desc="Decoding", leave=False):
+            pool: list[tuple[float, Hypothesis]] = []
+            for hyp in beam:
+                # 1. Nucleus proposal from this hypothesis's recent context
+                context = "".join(hyp.words[-self.config.context_words :])
+                chars, logprobs = self._nucleus_propose(context)
+                if not chars:
+                    continue
 
-        # Step 3: Decode step-by-step
-        for t in tqdm(range(min(T, self.config.max_chars)), desc="Decoding", leave=False):
-            # 3a. Nucleus sampling from LM
-            candidates_text, candidates_logprob = self._nucleus_propose(
-                prev_context, top_p=self.config.lm_mass
-            )
-            if not candidates_text:
+                # 2. Contextualized features of candidate chars (layer L)
+                cand_feats = self._candidate_features(hyp.words, chars)  # (K, 768)
+
+                # 3. Cosine similarity with the brain prediction at step t
+                brain_t = brain_features[t]  # (768,)
+                sims = F.cosine_similarity(
+                    brain_t.unsqueeze(0), cand_feats, dim=-1
+                )  # (K,)
+
+                # 4. Combined score per extension
+                for char, lp, sim in zip(chars, logprobs, sims.tolist()):
+                    score = hyp.score + lp + self.config.sim_ratio * sim
+                    pool.append((score, hyp.extend(char, lp)))
+
+            if not pool:
                 break
-
-            # 3b. Embed candidates via LM embedding
-            cand_embs = self._embed_texts(candidates_text)  # (K, 768)
-
-            # 3c. Score by cosine similarity with brain prediction
-            brain_t = brain_features[t]  # (768,)
-            sims = F.cosine_similarity(brain_t.unsqueeze(0), cand_embs, dim=-1)  # (K,)
-
-            # 3d. Combine LM logprob + brain similarity
-            # Tunable weighting: brain similarity gets a bonus
-            combined = torch.tensor(
-                [lp + 0.5 * s.item() for lp, s in zip(candidates_logprob, sims)],
-                device=self.device,
-            )
-
-            # 3e. Update beam: keep top beam_width
-            top_k = min(self.config.extensions, len(candidates_text))
-            top_scores, top_idx = combined.topk(top_k)
-
-            # Extend beam with best candidates
-            new_beam = []
-            for score, idx in zip(top_scores.tolist(), top_idx.tolist()):
-                char = candidates_text[idx]
-                logprob = candidates_logprob[idx]
-                emb = cand_embs[idx]
-                # Find which hypothesis this extends (currently just the single beam)
-                new_beam.append(beam[0].extend(char, logprob, emb))
-            beam = new_beam
-
-            # 3f. Build context for next step
-            prev_context = "".join(beam[0].words[-10:])  # last 10 chars as context
+            pool.sort(key=lambda x: -x[0])
+            beam = [hyp for _, hyp in pool[: self.config.beam_width]]
 
             if (t + 1) % self.config.log_interval == 0:
-                logger.info("  step %d: best='%s' score=%.3f", t + 1, beam[0].words[-1] if beam[0].words else "", beam[0].score)
+                best = beam[0]
+                logger.info(
+                    "step %d: best='%s' score=%.3f",
+                    t + 1,
+                    best.words[-1] if best.words else "",
+                    best.score,
+                )
 
-        # Return best beam
         return "".join(beam[0].words)
 
     # ───────────────────── Internal helpers ─────────────────────
 
     def _encode_brain(self, brain_input: torch.Tensor) -> torch.Tensor:
-        """Run brain encoder on the full story.
+        """Run the brain encoder over the full story.
 
-        For chunked MEG (3D), we need to handle one time step at a time
-        because each time step is a window of past context. For simplicity
-        here, we just iterate.
+        Chunked MEG arrives as (T, n_context, n_channels): each t is a
+        window of past context, so steps are encoded one at a time.
         """
         if brain_input.ndim == 3:
-            # Chunked MEG: (T, n_context, C) — process each t
-            T = brain_input.shape[0]
             features = []
-            for t in range(T):
+            for t in range(brain_input.shape[0]):
                 out = self.brain_encoder(brain_input[t].unsqueeze(0))
                 if isinstance(out, tuple):
                     out = out[0]
                 features.append(out)
             return torch.cat(features, dim=0)
-        else:
-            # Other modalities: pass the whole tensor at once
-            out = self.brain_encoder(brain_input)
-            if isinstance(out, tuple):
-                out = out[0]
-            return out
+        out = self.brain_encoder(brain_input)
+        if isinstance(out, tuple):
+            out = out[0]
+        return out
 
-    def _nucleus_propose(self, context: str, top_p: float = 0.9) -> tuple[list[str], list[float]]:
-        """Nucleus sampling from the LM.
+    def _valid_token_mask(self) -> torch.Tensor:
+        """Bool mask (model vocab_size,) over tokens that decode to single chars.
 
-        Args:
-            context: Text context (last N characters).
-            top_p: Cumulative probability threshold.
+        Sized by the MODEL's vocab (``config.vocab_size``), not the
+        tokenizer's ``len()``: vocab.txt can carry an extra added token
+        that the embedding matrix does not have.
+        """
+        if self._valid_mask is None:
+            n = int(self.gpt_model.config.vocab_size)
+            mask = [
+                _is_valid_char(self.tokenizer.decode([i])) for i in range(n)
+            ]
+            self._valid_mask = torch.tensor(mask, device=self.device)
+            n_valid = int(self._valid_mask.sum().item())
+            logger.info("Decode vocabulary: %d/%d tokens are single chars", n_valid, n)
+        return self._valid_mask
+
+    def _nucleus_propose(self, context: str) -> tuple[list[str], list[float]]:
+        """Nucleus-sample candidate next characters from the LM.
+
+        Sampling is restricted to tokens that decode to a single printable
+        character (see ``_valid_token_mask``) — the original pipeline's
+        restricted decode vocabulary. This keeps [UNK], special tokens,
+        and BPE fragments out of the beam.
 
         Returns:
-            Tuple of (candidate_texts, candidate_log_probs). Each text is a
-            single character (Chinese).
+            (candidate characters, their log probabilities). Cold start
+            (empty context) returns a fixed set of common characters.
         """
-        # Use the LAST character of the context to predict the next one
         if not context:
-            # Cold start: pick a common Chinese character
-            return (["的", "是", "我", "你", "他"], [-1.0, -1.2, -1.5, -1.8, -2.0])
+            return list(_COLD_START_CHARS), [-1.0] * len(_COLD_START_CHARS)
 
-        # Encode context
         input_ids = self.tokenizer.encode(context, return_tensors="pt").to(self.device)
         if input_ids.shape[1] == 0:
-            return (["的"], [0.0])
-
-        # Get LM logits (with KV cache, but HF handles that internally for generate)
-        with torch.no_grad():
-            outputs = self.gpt_model(input_ids)
-            logits = outputs.logits[0, -1, :]  # last token's logits
-
+            return [], []
+        logits = self.gpt_model(input_ids).logits[0, -1, :]
+        # Restrict to single-character tokens before the nucleus cutoff
+        mask = self._valid_token_mask()
+        logits = logits[: mask.shape[0]].masked_fill(~mask, -float("inf"))
         probs = F.softmax(logits, dim=-1)
 
-        # Sort by probability descending
         sorted_probs, sorted_idx = probs.sort(descending=True)
-        cumsum = sorted_probs.cumsum(dim=-1)
-
-        # Find cutoff for nucleus sampling
-        cutoff = (cumsum <= top_p).sum().item() + 1
-        nucleus_probs = sorted_probs[:cutoff] / sorted_probs[:cutoff].sum()  # renormalize
+        cutoff = (sorted_probs.cumsum(dim=-1) <= self.config.lm_mass).sum().item() + 1
+        nucleus_probs = sorted_probs[:cutoff]
+        nucleus_probs = nucleus_probs / nucleus_probs.sum()
         nucleus_idx = sorted_idx[:cutoff]
 
-        # Sample K candidates
-        K = min(self.config.extensions, len(nucleus_idx))
-        sampled = torch.multinomial(nucleus_probs, K, replacement=False)
-        chosen_idx = nucleus_idx[sampled]
-        chosen_probs = nucleus_probs[sampled]
-        chosen_logprobs = torch.log(chosen_probs + 1e-12)
+        k = min(self.config.extensions, len(nucleus_idx))
+        sampled = torch.multinomial(nucleus_probs, k, replacement=False)
+        chosen_logprobs = torch.log(nucleus_probs[sampled] + 1e-12)
+        chars = [self.tokenizer.decode([int(i)]) for i in nucleus_idx[sampled]]
+        return chars, chosen_logprobs.tolist()
 
-        # Decode to characters
-        texts = []
-        for idx in chosen_idx.tolist():
-            tok = self.tokenizer.decode([idx])
-            texts.append(tok)
+    def _candidate_features(
+        self, history: list[str], chars: list[str]
+    ) -> torch.Tensor:
+        """Layer-``select_layer`` GPT-2 features of candidate characters.
 
-        return texts, chosen_logprobs.tolist()
-
-    def _embed_texts(self, texts: list[str]) -> torch.Tensor:
-        """Embed candidate texts via the LM's input embeddings.
-
-        We use the embedding of the LAST token of each text as a
-        proxy for the text's semantic representation.
+        Port of the original ``LMFeatures.extend``: the feature of a
+        candidate char is the GPT-2 hidden state at ``select_layer`` at the
+        char's position, conditioned on the previous ``context_words``
+        chars of the hypothesis. All candidates are batched with left
+        padding (pad token id 0), so one forward serves the whole batch.
         """
-        embs = []
-        for t in texts:
-            ids = self.tokenizer.encode(t, return_tensors="pt").to(self.device)
-            if ids.shape[1] == 0:
-                # Fall back to a zero vector
-                embs.append(torch.zeros(self.config.semantic_dim, device=self.device))
-                continue
-            with torch.no_grad():
-                emb_layer = self.gpt_model.get_input_embeddings()
-                # Take the last token's embedding
-                tok_emb = emb_layer(ids)[0, -1, :]
-                embs.append(tok_emb)
-        return torch.stack(embs, dim=0)
+        pad_id = self.tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = self.tokenizer.eos_token_id
+        contexts = [
+            history[-(self.config.context_words) :] + [c] for c in chars
+        ]
+        max_len = max(len(ctx) for ctx in contexts)
+        ids = []
+        for ctx in contexts:
+            tok = self.tokenizer.convert_tokens_to_ids(ctx)
+            ids.append([pad_id] * (max_len - len(tok)) + tok)
+        input_ids = torch.tensor(ids, device=self.device)
+        attention_mask = (input_ids != pad_id).long()
 
-
-# Try to import tqdm, fall back to a simple iterator if not available
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(iterable, **kwargs):
-        return iterable
+        outputs = self.gpt_model(
+            input_ids, attention_mask=attention_mask, output_hidden_states=True
+        )
+        hidden = outputs.hidden_states[self.config.select_layer]  # (B, L, 768)
+        last_pos = attention_mask.sum(dim=1) - 1  # position of each char
+        feats = hidden[torch.arange(hidden.shape[0], device=self.device), last_pos]
+        return feats
 
 
 __all__ = ["BeamSearchDecoder", "DecodingConfig", "Hypothesis"]

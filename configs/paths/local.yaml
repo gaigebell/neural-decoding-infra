@@ -6,5 +6,5 @@ processed_root: E:/results            # preprocessed results (MEG/zresp, zresp/c
 results_dir: ./tests/tmp_results
 pretrained_root: ./tests/fake_pretrained
 
-gpt_path: ${paths.pretrained_root}/fake_gpt
+gpt_path: D:/allforwork/Liu_Lab/_Reconstruction/gpt2-chinese-cluecorpussmall
 brainomni_path: ${paths.pretrained_root}/fake_brainomni

@@ -126,6 +126,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Real-data smoke verified end-to-end on CPU: MEG (3 stories → 12 samples,
   1 epoch, loss 1.20) and fMRI (1 story → 2 steps, 1 epoch, loss 0.71).
 - `discover_drdr` no longer lists stories whose zstim is missing.
+- **Decoder rewritten and verified against the local GPT-2** (2026-08-20):
+  - Proper beam search: `beam_width` hypotheses maintained; per hypothesis
+    `extensions` nucleus proposals; global pool pruned by
+    `logprob + sim_ratio * cos`.
+  - Candidate features now match the original `LMFeatures`: GPT-2 hidden
+    state at `select_layer` (10) with `context_words` (5) left context,
+    batched with left padding.
+  - Restricted decode vocabulary: proposals are masked to tokens that
+    decode to a single printable character (7369/21128), eliminating the
+    `[UNK]`-loop pathology of unrestricted sampling. Mask is sized by the
+    MODEL's `vocab_size` (tokenizer can carry an extra added token).
+  - Honest docs: KV-cache reuse is documented as planned, not claimed;
+    constant-size LM context is the current speedup lever.
+  - `decode.py`: `--checkpoint` optional (random-init smoke with warning);
+    `--processed-root`/`--gpt-path` platform-aware defaults; loads the
+    FULL story tensor `(T, ctx, C)` instead of one sample; memmap copy
+    fixes the read-only tensor warning.
+  - `paths.local/cluster.yaml`: real `gpt_path`
+    (`gpt2-chinese-cluecorpussmall`).
+  - Trainer: `ckpt.dir` interpolation (`${paths.results_dir}`) now
+    resolves — checkpoints land under `results_dir/ckpt/<timestamp>/`.
+- Decode smoke on the owner's dev machine (CPU, 1-epoch MEG ckpt):
+  1011-step story → 30 beam steps → 30 chars, all valid Chinese,
+  0 `[UNK]`; random-init path and `eval.py` CLI also verified.
 
 ### Planned
 

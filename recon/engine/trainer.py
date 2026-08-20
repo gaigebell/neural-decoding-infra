@@ -165,7 +165,10 @@ class Trainer:
 
     def _extract_train_config(self, cfg: DictConfig) -> TrainConfig:
         """Pull out the train sub-config, applying defaults."""
-        train_section = cfg.get("train", {})
+        # Resolve interpolations once (e.g. ckpt.dir's ${paths.results_dir})
+        resolved = OmegaConf.to_container(cfg, resolve=True)
+        cfg_dict = resolved if isinstance(resolved, dict) else {}
+        train_section = cfg_dict.get("train", {})
         return TrainConfig(
             epochs=int(train_section.get("epochs", 100)),
             batch_size=int(train_section.get("batch_size", 32)),
@@ -181,7 +184,11 @@ class Trainer:
             log_interval=int(train_section.get("log_interval", 10)),
             save_interval=int(train_section.get("save_interval", 10)),
             eval_interval=int(train_section.get("eval_interval", 5)),
-            ckpt_dir=str(train_section.get("ckpt_dir", "./ckpt/${run_id}")),
+            ckpt_dir=str(
+                cfg_dict.get("ckpt", {}).get(
+                    "dir", train_section.get("ckpt_dir", "./ckpt/${run_id}")
+                )
+            ),
             keep_last_n=int(train_section.get("keep_last_n", 3)),
             seed=int(train_section.get("seed", 42)),
             smoke=bool(train_section.get("smoke", False)),
