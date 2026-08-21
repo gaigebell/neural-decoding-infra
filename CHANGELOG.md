@@ -98,6 +98,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where validated samples become batched tensors (meg / meg_chunked / fmri /
   brainomni); wired into all four dataloader builders.
 - `tests/unit/test_collate.py`: shape/dtype/mixed-modality tests for collate.
+- `docs/guides/09-manual-review-checklist.md`: owner's manual code-review
+  checklist + tiered cluster verification plan (T0 environment → T5
+  resume-training), with known-pitfall reminders.
 - `tests/integration/test_real_data.py`: Tier 1 integration tests against
   the real DRDR data (discovery, delay weighting, MEG alignment shift,
   collate + model forward, fMRI volume/mask). Auto-skipped when data is
