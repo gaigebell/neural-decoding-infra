@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .optional import extra_installed
+from .optional import is_installed
 
 # ───────────────────── Standard Python logger ─────────────────────
 
@@ -100,7 +100,8 @@ class WandBLogger:
             dir: Where to store wandb files. Defaults to ./wandb/.
             **kwargs: Forwarded to ``wandb.init``.
         """
-        self._enabled = extra_installed("data-public") and os.environ.get(
+        # wandb is a CORE dependency (not an extra) — check the package itself.
+        self._enabled = is_installed("wandb") and os.environ.get(
             "WANDB_DISABLED", ""
         ).lower() not in ("1", "true", "yes")
 
@@ -110,7 +111,7 @@ class WandBLogger:
             get_logger(__name__).warning(
                 "WandBLogger initialized in DISABLED mode (no logging will occur). "
                 "Reason: %s",
-                "wandb not installed" if not extra_installed("data-public") else "WANDB_DISABLED",
+                "wandb not installed" if not is_installed("wandb") else "WANDB_DISABLED",
             )
             return
 

@@ -52,41 +52,45 @@ echo "  master:       ${MASTER_NODE} (${MASTER_ADDR}:${MASTER_PORT})"
 echo ""
 
 # ───────────────────── Build the command ─────────────────────
-# The Python command to run on every node (RANK differs per node).
+# The Python command to run on every node (one per GPU: RANK and
+# LOCAL_RANK differ per process).
 build_cmd() {
     local rank=$1
+    local local_rank=$2
     cat <<EOF
 cd ${REPO_ROOT} && \
 RANK=${rank} \
+LOCAL_RANK=${local_rank} \
 MASTER_ADDR=${MASTER_ADDR} \
 MASTER_PORT=${MASTER_PORT} \
 WORLD_SIZE=${WORLD_SIZE} \
+WANDB_MODE=${WANDB_MODE:-offline} \
 NCCL_DEBUG=${NCCL_DEBUG:-INFO} \
-NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-p5p1} \
+NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1} \
+NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-} \
 python -m recon.cli.train \
   --config-path=configs \
   paths=cluster \
-  train.nnodes=${NNODES} \
-  train.nproc_per_node=${GPUS_PER_NODE} \
-  train.node_rank=${rank} \
   $@
 EOF
 }
 
 # ───────────────────── Launch on each node ─────────────────────
-echo "Launching on ${NNODES} nodes..."
+echo "Launching ${WORLD_SIZE} processes on ${NNODES} nodes..."
 PIDS=()
 
 for i in "${!NODES[@]}"; do
     NODE="${NODES[$i]}"
-    RANK=$((i * GPUS_PER_NODE))
-    CMD=$(build_cmd "${RANK}" "$@")
+    for gpu in $(seq 0 $((GPUS_PER_NODE - 1))); do
+        RANK=$((i * GPUS_PER_NODE + gpu))
+        CMD=$(build_cmd "${RANK}" "${gpu}" "$@")
 
-    echo "  → ${NODE} (rank=${RANK})"
+        echo "  → ${NODE} (rank=${RANK}, local_rank=${gpu})"
 
-    # SSH to node, run in background
-    ssh -o StrictHostKeyChecking=no "${NODE}" "${CMD}" &
-    PIDS+=($!)
+        # SSH to node, run in background (one process per GPU)
+        ssh -o StrictHostKeyChecking=no "${NODE}" "${CMD}" &
+        PIDS+=($!)
+    done
 done
 
 echo ""

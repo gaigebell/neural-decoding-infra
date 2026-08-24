@@ -135,13 +135,21 @@ class Trainer:
         self.optimizer = self._build_optimizer()
         self.scheduler = self._build_scheduler()
 
-        # Logging (only on rank 0)
+        # Logging (only on rank 0). On air-gapped compute nodes set
+        # WANDB_MODE=offline (or logging.wandb_mode: offline): metrics are
+        # written to ./wandb/ on the shared NFS mount and later uploaded
+        # from the internet-connected mgmt node via `wandb sync`
+        # (scripts/sync_wandb.sh).
         self.wandb: WandBLogger | None = None
         if self.rank == 0:
+            logging_cfg = cfg.get("logging", {}) if isinstance(cfg, DictConfig) else {}
             self.wandb = WandBLogger(
-                project=os.environ.get("WANDB_PROJECT", "neural-decoding-infra"),
+                project=os.environ.get(
+                    "WANDB_PROJECT", logging_cfg.get("wandb_project", "neural-decoding-infra")
+                ),
                 config=OmegaConf.to_container(cfg, resolve=True),
                 name=os.environ.get("WANDB_RUN_NAME"),
+                mode=os.environ.get("WANDB_MODE", logging_cfg.get("wandb_mode", "online")),
             )
 
         # Set seeds

@@ -171,8 +171,11 @@ python -m recon.cli.decode \
 4. **PH402 = Pascal**：无 fp16 tensor core、无 bf16 → `train.amp=false`。
 5. **Windows 专用 guard 不影响 Linux**：`num_workers` 自动降级只在
    win32 触发；集群上 `num_workers=2` 正常 fork。
-6. **W&B**：rank 0 需要 `wandb login`；离线集群可设
-   `WANDB_MODE=offline`（`WandBLogger` 已支持禁用降级）。
+6. **W&B 在离线计算节点**：计算节点无互联网 → `WANDB_MODE=offline`
+   （launch 脚本已默认），rank 0 把 run 写到共享 NFS 的 `./wandb/`；
+   在**有网的管理节点**上跑 `bash scripts/sync_wandb.sh` 上传
+   （需 mgmt 上 `wandb login` 一次）。**不需要 mgmt 转发代理**——这是
+   W&B 官方为 air-gapped 场景设计的方案，比自建 relay 少一个故障点。
 7. **NFS IO**：fMRI cube 单 story ~2GB，首次 mmap 读会慢；训练前可
    预读热身（`dd` 或跑一个 epoch 空转）。后续 P2 考虑预加载到节点本地盘。
 8. **端口**：`MASTER_PORT=29500` 需在节点间互通（手动 ssh 模式没有
@@ -191,4 +194,9 @@ python -m recon.cli.decode \
 - [x] 本地单卡 GPU（RTX 4060）：训练 AMP 修复、解码、回归全绿
 - [x] 数据发现、延迟加权、对齐位移、collate 均有测试锁定
 - [x] DDP 后端选择：`nccl`（cuda）/`gloo`（cpu）已实现
-- [x] `scripts/launch_multi_node.sh` 多节点启动脚本已就绪
+- [x] `scripts/launch_multi_node.sh`：每节点每 GPU 一个进程、
+      连续 RANK + LOCAL_RANK（2026-08-20 修复了只起 4 进程 rank 断号的
+      卡死 bug）；默认 `WANDB_MODE=offline` + `NCCL_IB_DISABLE=1`
+- [x] W&B 离线方案：`logging.wandb_mode` 配置 + `scripts/sync_wandb.sh`
+      （mgmt 端上传），`WandBLogger` 的依赖检查 bug 已修（wandb 是 core
+      依赖，不再误判为需要 data-public extra）

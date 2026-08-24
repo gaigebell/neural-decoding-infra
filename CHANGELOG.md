@@ -58,6 +58,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **W&B on air-gapped compute nodes**: `WandBLogger` checked the
+  `data-public` extra instead of the `wandb` package itself (wandb is a
+  core dependency — logging silently disabled on minimal installs).
+  Trainer now passes `logging.wandb_mode` / `WANDB_MODE` through;
+  compute nodes run `offline` (launch script default) and write
+  `./wandb/` on the shared NFS mount; the internet-connected mgmt node
+  uploads via the new `scripts/sync_wandb.sh`. No relay daemon needed.
+- **`scripts/launch_multi_node.sh` rank bug**: it launched ONE process
+  per node while claiming `WORLD_SIZE=8` (ranks 1/3/5/7 never started →
+  init hang). Now one process per GPU with consecutive RANK + LOCAL_RANK,
+  `WANDB_MODE=offline` and `NCCL_IB_DISABLE=1` defaults, and the bogus
+  `train.nnodes` overrides removed.
 - **AMP dtype bug (GPU)**: the trainer computed the loss OUTSIDE the
   autocast context, mixing fp16 model outputs with the fp32 target
   ("Found dtype Float but expected Half" on the fMRI IB model). Loss is

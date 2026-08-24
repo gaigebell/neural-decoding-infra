@@ -44,6 +44,9 @@ ckpt:
 # Logging
 logging:
   wandb_project: neural-decoding-infra
+  # "online" uploads directly; "offline" writes ./wandb/ for later
+  # `wandb sync` from an internet-connected node (WANDB_MODE env wins).
+  wandb_mode: online
   log_interval: 10
 
 # Run identifier (used in ckpt paths, wandb name, etc.)
