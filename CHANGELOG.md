@@ -146,6 +146,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `configs/data/drdr.yaml` / `drdr_fmri.yaml`: `weights`, `stories`,
   `mask_path` options.
 
+### Added
+
+- `docs/architecture/02-data-pipeline.md`: full data-pipeline reference
+  (stage-by-stage data forms, runtime flow, read-efficiency and space
+  analysis, design rationale with evidence).
+- `docs/tutorials/01-data-pipeline-design.md`: Karpathy-style progressive
+  tutorial — from "data fits in RAM" to industrial scale, each stage
+  motivated by breaking the previous assumption; analysis toolbox and
+  improvement methodology. New `docs/tutorials/` section added to the
+  documentation index.
+
 ### Fixed
 
 - Real-data smoke verified end-to-end on CPU: MEG (3 stories → 12 samples,

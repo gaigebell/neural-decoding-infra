@@ -11,6 +11,7 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/):
 
 | Section | Question it answers | When to read |
 |---|---|---|
+| **[tutorials/](tutorials/)** | "How do I learn the design method?" | When you want to master a skill, not just do a task |
 | **[architecture/](architecture/)** | "Why is the system designed this way?" | When you need to understand a component |
 | **[decisions/](decisions/)** | "What did we decide and what were the alternatives?" | When you question a design choice |
 | **[standards/](standards/)** | "How should I write code/docs?" | Before writing code or docs |
@@ -21,6 +22,9 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/):
 ---
 
 ## Quick links
+
+### 🎓 Tutorials
+- [Data pipeline design: from assumptions to industrial scale](tutorials/01-data-pipeline-design.md)
 
 ### 🏗️ Architecture
 - [System overview](architecture/01-overview.md)
@@ -83,4 +87,4 @@ When adding a new doc:
 
 ---
 
-Last updated: 2026-07-28 by owner.
+Last updated: 2026-08-20 by owner.
