@@ -173,7 +173,100 @@ def test_trainer_runs_one_step_with_fake_data():
     assert metrics["total_loss"] > 0
 
 
-# ───────────────────── Test 5: Config composition ─────────────────────
+# ───────────────────── Test 5: Startup checks + NaN guard ─────────────────────
+
+
+def _smoke_cfg(tmp_path: Path):
+    """Smoke config for Trainer construction (fake data, CPU-safe)."""
+    from omegaconf import OmegaConf
+
+    return OmegaConf.create(
+        {
+            "model": {"name": "meg_model_a", "n_channels": 306, "n_context": 5},
+            "data": {"name": "fake", "modality": "meg", "n_context": 5, "n_samples": 16},
+            "paths": {
+                "data_root": "/tmp",
+                "processed_root": "/tmp",
+                "results_dir": str(tmp_path),
+                "pretrained_root": "/tmp/pretrained",
+            },
+            "train": {
+                "epochs": 1,
+                "batch_size": 2,
+                "amp": False,
+                "num_workers": 0,
+                "max_steps_per_epoch": 2,
+                "log_interval": 1,
+                "smoke": True,
+                "save_interval": 10,
+                "ckpt_dir": f"{tmp_path}/ckpt/${{run_id}}",
+            },
+            # run_id must exist or the ${run_id} interpolation fails on resolve
+            "run_id": "test",
+            # Keep wandb out of tests (mode=disabled = no network, no files)
+            "logging": {"wandb_mode": "disabled"},
+        }
+    )
+
+
+def test_fit_runs_startup_checks_and_metadata(tmp_path: Path):
+    """fit() must run the fail-fast checks and write run_metadata.json."""
+    import json
+
+    from recon.engine.trainer import Trainer
+
+    trainer = Trainer(_smoke_cfg(tmp_path), rank=0, world_size=1)
+    trainer.fit()  # startup checks (device/data/dry-run) + 1 smoke epoch
+
+    metadata_path = Path(trainer.train_cfg.ckpt_dir) / "run_metadata.json"
+    assert metadata_path.exists()
+    meta = json.loads(metadata_path.read_text())
+    assert meta["model"]["name"] == "meg_model_a"
+    assert meta["model"]["n_params"] > 0
+    # smoke mode overrides fake-data size to 32 (trainer behavior)
+    assert meta["data"]["n_train_samples"] == 32
+    assert meta["config"]["train"]["smoke"] is True
+
+
+def test_nan_loss_aborts(tmp_path: Path, monkeypatch):
+    """Non-finite loss must raise with abort_on_nan=true (default)."""
+    import torch
+    import pytest
+
+    from recon.engine.trainer import Trainer
+
+    trainer = Trainer(_smoke_cfg(tmp_path), rank=0, world_size=1)
+    train_loader, _ = trainer.build_dataloaders()
+
+    def fake_loss(pred, target, aux=None):
+        return torch.tensor(float("nan")), {"total_loss": float("nan")}
+
+    monkeypatch.setattr(trainer, "_model_compute_loss", fake_loss)
+    with pytest.raises(RuntimeError, match="Non-finite loss"):
+        trainer._train_epoch(train_loader, epoch=0)
+
+
+def test_nan_loss_skips_when_disabled(tmp_path: Path, monkeypatch):
+    """abort_on_nan=false must skip the step and finish the epoch."""
+    import torch
+
+    from recon.engine.trainer import Trainer
+
+    cfg = _smoke_cfg(tmp_path)
+    cfg.train.abort_on_nan = False
+    trainer = Trainer(cfg, rank=0, world_size=1)
+    train_loader, _ = trainer.build_dataloaders()
+
+    def fake_loss(pred, target, aux=None):
+        return torch.tensor(float("nan")), {"total_loss": float("nan")}
+
+    monkeypatch.setattr(trainer, "_model_compute_loss", fake_loss)
+    metrics = trainer._train_epoch(train_loader, epoch=0)
+    # All steps were skipped -> no batches accumulated -> default metrics
+    assert metrics["total_loss"] == 0.0
+
+
+# ───────────────────── Test 6: Config composition ─────────────────────
 
 
 def test_hydra_config_loads():
@@ -203,7 +296,7 @@ def test_path_override_local():
     assert "E:" in merged.paths.data_root
 
 
-# ───────────────────── Test 6: No GPU required ─────────────────────
+# ───────────────────── Test 7: No GPU required ─────────────────────
 
 
 def test_no_cuda_required():

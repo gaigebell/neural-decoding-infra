@@ -23,14 +23,19 @@ hooks, not by editing the core class.
 """
 from __future__ import annotations
 
+import datetime
 import itertools
+import json
 import logging
 import os
+import signal
+import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, cast
 
 import torch
 import torch.nn as nn
@@ -41,6 +46,7 @@ from tqdm import tqdm
 from ..data.collate import collate_brain_stim_pairs
 from ..data.datasets.meg import MEGDataset
 from ..data.datasets.fmri import fMRIDataset
+from ..data.drdr import DRDRIndex
 from ..models.registry import build_model
 from ..utils.logging import WandBLogger, get_logger
 
@@ -77,6 +83,7 @@ class TrainConfig:
     seed: int = 42
     smoke: bool = False
     max_steps_per_epoch: int | None = None  # for smoke tests
+    abort_on_nan: bool = True  # stop training on non-finite loss
 
 
 # ───────────────────── Trainer ─────────────────────
@@ -158,13 +165,19 @@ class Trainer:
     # ───────────────────── Initialization helpers ─────────────────────
 
     def _init_distributed(self) -> None:
-        """Initialize torch.distributed for DDP."""
+        """Initialize torch.distributed for DDP.
+
+        The 10-minute timeout matters on a cluster: if one rank dies or a
+        port is blocked, the others fail fast instead of hanging for the
+        default 30 minutes.
+        """
         os.environ["MASTER_ADDR"] = self.master_addr
         os.environ["MASTER_PORT"] = str(self.master_port)
         torch.distributed.init_process_group(
             backend="nccl" if self.device.type == "cuda" else "gloo",
             rank=self.rank,
             world_size=self.world_size,
+            timeout=datetime.timedelta(minutes=10),
         )
         logger.info(
             "DDP initialized: rank=%d/%d, master=%s:%d",
@@ -201,6 +214,7 @@ class Trainer:
             seed=int(train_section.get("seed", 42)),
             smoke=bool(train_section.get("smoke", False)),
             max_steps_per_epoch=train_section.get("max_steps_per_epoch", None),
+            abort_on_nan=bool(train_section.get("abort_on_nan", True)),
         )
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
@@ -425,53 +439,218 @@ class Trainer:
     def fit(self) -> None:
         """Run the full training loop.
 
-        For each epoch:
-            1. Train one epoch (one pass through train_loader)
-            2. Optionally evaluate (if val_loader and epoch % eval_interval == 0)
-            3. Save checkpoint (if epoch % save_interval == 0)
+        Sequence:
+            0. Startup checks (devices, distributed comms, data contract,
+               dry-run forward/backward) — fail fast BEFORE training
+            1. Per epoch: train; (val hook reserved); checkpoint on interval
+            2. Cleanup in ``finally`` — signal-safe shutdown
+
+        SIGINT/SIGTERM set ``self._aborted``; the loop exits at the next
+        batch boundary, saves a checkpoint (rank 0), and cleans up.
         """
         train_loader, val_loader = self.build_dataloaders()
         # smoke mode = 1 epoch (fast sanity run), regardless of config
         n_epochs = 1 if self.train_cfg.smoke else int(self.train_cfg.epochs)
+
+        prev_handlers = self._install_signal_handlers()
+        self._aborted = False
+        self._run_startup_checks(train_loader)
+        if self.rank == 0:
+            self._write_run_metadata(train_loader)
+
         logger.info("Starting training: %d epochs, batch_size=%d", n_epochs, self.train_cfg.batch_size)
+        try:
+            for epoch in range(n_epochs):
+                if self._aborted:
+                    logger.warning("Abort signal received — stopping before epoch %d", epoch + 1)
+                    break
 
-        for epoch in range(n_epochs):
-            t0 = time.time()
-            train_metrics = self._train_epoch(train_loader, epoch)
-            epoch_time = time.time() - t0
+                # DDP: re-shuffle every epoch (DistributedSampler needs this)
+                sampler = getattr(train_loader, "sampler", None)
+                if isinstance(sampler, DistributedSampler):
+                    sampler.set_epoch(epoch)
 
-            logger.info(
-                "Epoch %d/%d: loss=%.4f (cos=%.4f, mse=%.4f%s) [%.1fs]",
-                epoch + 1,
-                n_epochs,
-                train_metrics.get("total_loss", 0.0),
-                train_metrics.get("cosine_loss", 0.0),
-                train_metrics.get("mse_loss", 0.0),
-                f", kl={train_metrics.get('kl_loss', 0.0):.4f}" if "kl_loss" in train_metrics else "",
-                epoch_time,
-            )
+                t0 = time.time()
+                train_metrics = self._train_epoch(train_loader, epoch)
+                epoch_time = time.time() - t0
 
-            # Log to WandB
-            if self.wandb and self.wandb.enabled:
-                self.wandb.log(
-                    {f"train/{k}": v for k, v in train_metrics.items()},
-                    step=epoch,
+                logger.info(
+                    "Epoch %d/%d: loss=%.4f (cos=%.4f, mse=%.4f%s) [%.1fs]",
+                    epoch + 1,
+                    n_epochs,
+                    train_metrics.get("total_loss", 0.0),
+                    train_metrics.get("cosine_loss", 0.0),
+                    train_metrics.get("mse_loss", 0.0),
+                    f", kl={train_metrics.get('kl_loss', 0.0):.4f}" if "kl_loss" in train_metrics else "",
+                    epoch_time,
                 )
-                self.wandb.log({"train/lr": self.optimizer.param_groups[0]["lr"]}, step=epoch)
 
-            # Save checkpoint
-            if (epoch + 1) % self.train_cfg.save_interval == 0 and self.rank == 0:
-                self.save_checkpoint(epoch, train_metrics)
+                # Log to WandB
+                if self.wandb and self.wandb.enabled:
+                    self.wandb.log(
+                        {f"train/{k}": v for k, v in train_metrics.items()},
+                        step=epoch,
+                    )
+                    self.wandb.log({"train/lr": self.optimizer.param_groups[0]["lr"]}, step=epoch)
 
-            # Step scheduler
-            if self.scheduler is not None:
-                self.scheduler.step()
+                # Save checkpoint
+                if (epoch + 1) % self.train_cfg.save_interval == 0 and self.rank == 0:
+                    self.save_checkpoint(epoch, train_metrics)
 
-        # Cleanup
-        if self.wandb and self.wandb.enabled:
-            self.wandb.finish()
+                # Step scheduler
+                if self.scheduler is not None:
+                    self.scheduler.step()
+
+        finally:
+            if self.rank == 0 and self._aborted:
+                logger.warning("Saving emergency checkpoint after abort signal...")
+                try:
+                    self.save_checkpoint(self.train_cfg.epochs, {"aborted": True})
+                except Exception:  # pragma: no cover — best effort
+                    logger.exception("Emergency checkpoint failed")
+            if self.wandb and self.wandb.enabled:
+                self.wandb.finish()
+            if self.is_distributed and torch.distributed.is_initialized():
+                torch.distributed.destroy_process_group()
+            # Restore previous signal handlers (tests, embedding contexts)
+            for sig, handler in prev_handlers.items():
+                signal.signal(sig, handler)
+
+    # ───────────────────── Startup checks ─────────────────────
+
+    def _install_signal_handlers(self) -> dict[int, Any]:
+        """Install SIGINT/SIGTERM handlers; return the previous handlers."""
+        prev: dict[int, Any] = {}
+
+        def _handle(signum: int, _frame: Any) -> None:
+            logger.warning("Received signal %s — aborting after current batch", signum)
+            self._aborted = True
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            prev[sig] = signal.getsignal(sig)
+            signal.signal(sig, _handle)
+        return prev
+
+    def _run_startup_checks(self, train_loader: DataLoader) -> None:
+        """Fail fast BEFORE training: devices, comms, data, dry-run."""
+        # 1. Devices
+        if self.device.type == "cuda":
+            n_devices = torch.cuda.device_count()
+            logger.info(
+                "Device check: rank=%d local_rank=%d, %d CUDA device(s) on node: %s",
+                self.rank, self.local_rank, n_devices,
+                [torch.cuda.get_device_name(i) for i in range(n_devices)],
+            )
+            if self.local_rank >= n_devices:
+                raise RuntimeError(
+                    f"local_rank={self.local_rank} but only {n_devices} CUDA "
+                    "device(s) available — check nproc_per_node / GPU allocation"
+                )
+
+        # 2. Distributed communication test (all_reduce must round-trip)
         if self.is_distributed:
-            torch.distributed.destroy_process_group()
+            dist = torch.distributed
+            probe = torch.tensor([float(self.rank)], device=self.device)
+            dist.all_reduce(probe)
+            expected = float(self.world_size * (self.world_size - 1) / 2)
+            if abs(probe.item() - expected) > 1e-6:
+                raise RuntimeError(
+                    f"Distributed all_reduce failed: got {probe.item()}, expected {expected}"
+                )
+            logger.info("Comm check passed: all_reduce round-trip OK (world_size=%d)", self.world_size)
+
+        # 3. Data contract: one real batch must exist and have sane shapes
+        try:
+            batch = next(iter(train_loader))
+        except StopIteration:
+            raise RuntimeError("train_loader is empty — check subjects/stories filters") from None
+        n_samples = len(train_loader.dataset)
+        logger.info(
+            "Data check: %d train samples, first batch brain=%s stim=%s",
+            n_samples, tuple(batch.brain.x.shape), tuple(batch.stim.zstim.shape),
+        )
+        if batch.brain.x.shape[0] == 0 or batch.stim.zstim.shape[0] == 0:
+            raise RuntimeError("First batch is empty")
+        if batch.stim.zstim.shape[-1] < 1:
+            raise RuntimeError("stim.zstim has no feature dim")
+
+        # 4. Dry-run: forward + backward (no optimizer step)
+        self.model.train()
+        brain_x = batch.brain.x.to(self.device)
+        stim_zstim = batch.stim.zstim.to(self.device)
+        ctx = (
+            torch.autocast(device_type="cuda", dtype=torch.float16)
+            if self.amp_enabled
+            else nullcontext()
+        )
+        with ctx:
+            pred, aux = self._model_forward(brain_x)
+            target = stim_zstim[..., : pred.shape[-1]]
+            dry_loss, _ = self._model_compute_loss(pred, target, aux)
+        dry_loss.backward()
+        grads = [p.grad for p in self.model.parameters() if p.grad is not None]
+        if not grads:
+            raise RuntimeError("Dry-run produced no gradients — model/optimizer wiring broken")
+        self.optimizer.zero_grad()
+        n_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        logger.info(
+            "Dry-run passed: forward+backward OK, loss=%.4f, %d/%d params have grads, total params=%d",
+            float(dry_loss), len(grads),
+            sum(1 for p in self.model.parameters() if p.requires_grad), n_params,
+        )
+
+    def _write_run_metadata(self, train_loader: DataLoader) -> None:
+        """Write a human-readable run_metadata.json next to checkpoints."""
+        ckpt_dir = Path(self.train_cfg.ckpt_dir.replace("${run_id}", os.environ.get("RUN_ID", "run")))
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        data_cfg = self.cfg.get("data", {}) if isinstance(self.cfg, DictConfig) else {}
+        resolved_raw = OmegaConf.to_container(self.cfg, resolve=True)
+        resolved = resolved_raw if isinstance(resolved_raw, dict) else {}
+        model_cfg = resolved.get("model", {}) if isinstance(resolved.get("model"), dict) else {}
+        dataset = train_loader.dataset
+        n_train = len(cast(Any, dataset))
+        metadata = {
+            "run_id": os.environ.get("RUN_ID", None),
+            "git_commit": self._git_commit(),
+            "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "platform": {
+                "python": sys.version.split()[0],
+                "torch": torch.__version__,
+                "cuda": getattr(getattr(torch, "version", {}), "cuda", None),
+                "device": str(self.device),
+                "device_count": torch.cuda.device_count() if self.device.type == "cuda" else 0,
+                "world_size": self.world_size,
+                "rank": self.rank,
+            },
+            "model": {
+                "name": model_cfg.get("name"),
+                "n_params": sum(p.numel() for p in self.model.parameters() if p.requires_grad),
+            },
+            "data": {
+                "name": data_cfg.get("name") if isinstance(data_cfg, dict) else str(data_cfg),
+                "subjects": data_cfg.get("subjects") if isinstance(data_cfg, dict) else None,
+                "stories": data_cfg.get("stories") if isinstance(data_cfg, dict) else None,
+                "n_train_samples": n_train,
+                "batch_size": self.train_cfg.batch_size,
+                "steps_per_epoch": len(train_loader),
+            },
+            "config": resolved,
+        }
+        path = ckpt_dir / "run_metadata.json"
+        path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False, default=str))
+        logger.info("Run metadata written to %s", path)
+
+    @staticmethod
+    def _git_commit() -> str | None:
+        """Best-effort git commit hash of the current checkout."""
+        try:
+            out = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return out.stdout.strip() if out.returncode == 0 else None
+        except Exception:
+            return None
 
     def _train_epoch(
         self, train_loader: DataLoader, epoch: int
@@ -490,6 +669,16 @@ class Trainer:
             # Cycle the loader if it is shorter than max_steps, then take max_steps
             iterator = itertools.islice(_InfiniteIterator(train_loader), max_steps)
 
+        # Progress bar on rank 0 only (all ranks log would interleave garbage)
+        if self.rank == 0:
+            iterator = tqdm(
+                iterator,
+                desc=f"Epoch {epoch + 1}",
+                total=max_steps,
+                leave=False,
+                ncols=100,
+            )
+
         for step, batch in enumerate(iterator):
             # Move brain and stim to device
             brain_x = batch.brain.x.to(self.device)
@@ -502,29 +691,53 @@ class Trainer:
             # stim.zstim may hold several concatenated delays (e.g. 4 × 768
             # = 3072); models predict the first delay's embedding
             # (semantic_dim = pred.shape[-1]), so slice the target.
-            if self.amp_enabled:
-                with torch.amp.autocast("cuda", dtype=torch.float16):
-                    pred, aux_loss = self._model_forward(brain_x)
-                    target = stim_zstim[..., : pred.shape[-1]]
-                    loss, loss_dict = self._model_compute_loss(pred, target, aux_loss)
-            else:
+            ctx = (
+                torch.autocast(device_type="cuda", dtype=torch.float16)
+                if self.amp_enabled
+                else nullcontext()
+            )
+            with ctx:
                 pred, aux_loss = self._model_forward(brain_x)
                 target = stim_zstim[..., : pred.shape[-1]]
                 loss, loss_dict = self._model_compute_loss(pred, target, aux_loss)
 
+            # NaN / Inf guard: fail fast instead of burning cluster hours
+            if not torch.isfinite(loss):
+                logger.error(
+                    "Non-finite loss %.4f at epoch %d step %d (rank %d)",
+                    float(loss), epoch, step, self.rank,
+                )
+                if self.train_cfg.abort_on_nan:
+                    raise RuntimeError(
+                        f"Non-finite loss ({float(loss)}) at epoch {epoch} step {step}. "
+                        "Training aborted — lower the LR, enable grad clipping, "
+                        "or set train.abort_on_nan=false to skip non-finite steps."
+                    )
+                logger.warning("Skipping non-finite step (abort_on_nan=false)")
+                continue
+
             # Backward
             self.optimizer.zero_grad()
             loss.backward()
+            grad_norm = float("nan")
             if self.train_cfg.grad_clip > 0:
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.train_cfg.grad_clip)
+                grad_norm = float(
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.train_cfg.grad_clip)
+                )
             self.optimizer.step()
 
             # Accumulate
             for k, v in loss_dict.items():
                 running[k] = running.get(k, 0.0) + v
+            running["grad_norm"] = running.get("grad_norm", 0.0) + grad_norm
             n_batches += 1
 
-            # Log
+            # Progress bar + periodic log
+            if self.rank == 0 and isinstance(iterator, tqdm):
+                iterator.set_postfix(
+                    loss=f"{loss_dict.get('total_loss', float(loss)):.4f}",
+                    grad=f"{grad_norm:.2f}",
+                )
             if (step + 1) % self.train_cfg.log_interval == 0 and self.rank == 0:
                 avg = {k: v / n_batches for k, v in running.items()}
                 logger.debug("  step %d: %s", step + 1, {k: f"{v:.4f}" for k, v in avg.items()})
@@ -636,15 +849,13 @@ class _InfiniteIterator:
             return next(self._it)
 
 
-def _filter_index(index, data_cfg: DictConfig):
+def _filter_index(index: DRDRIndex, data_cfg: DictConfig) -> DRDRIndex:
     """Filter a DRDRIndex by configured subjects/stories.
 
-    Returns the same index object with ``pairs`` (and derived dicts)
-    restricted to the configured subjects/stories. If neither filter is
-    set, returns the index unchanged.
+    Returns a new index with ``pairs`` (and derived dicts) restricted to
+    the configured subjects/stories. If neither filter is set, returns
+    the index unchanged.
     """
-    from ..data.drdr import DRDRIndex
-
     subjects = data_cfg.get("subjects")
     stories = data_cfg.get("stories")
     if not subjects and not stories:

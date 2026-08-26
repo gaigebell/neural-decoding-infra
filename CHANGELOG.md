@@ -58,6 +58,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stability hardening (P0, owner review round 1)**:
+  - **Startup fail-fast checks** before training: device count vs
+    local_rank, distributed all_reduce round-trip (10 min timeout),
+    data contract (first-batch shapes/dtypes, non-empty loader), and a
+    dry-run forward+backward (no optimizer step) that verifies gradients
+    exist. Training now aborts in seconds instead of mid-epoch.
+  - **`DistributedSampler.set_epoch`** now called per epoch (previously
+    missing — every epoch used the same shuffle order).
+  - **NaN/Inf guard**: `train.abort_on_nan` (default true) raises with a
+    diagnostic after saving an emergency checkpoint; false skips the
+    step. `grad_norm` is now tracked in metrics.
+  - **Signal handling**: SIGINT/SIGTERM set an abort flag; the loop exits
+    at the next batch boundary, saves a checkpoint on rank 0, and cleans
+    up wandb/process group in `finally`. Previous handlers restored.
+    `init_process_group` gets a 10-minute timeout (default 30 min).
+    `launch_multi_node.sh` gained a trap that pkills remote ranks on
+    Ctrl-C at the mgmt terminal.
+  - **`run_metadata.json`** written next to checkpoints: run_id, git
+    commit, start time, torch/CUDA/device/world info, model name + param
+    count, data name/subjects/stories/sample count, full resolved config.
+  - **Rank-0 tqdm progress bar** with live loss + grad norm postfix.
+  - Tests disable wandb (`logging.wandb_mode: disabled`); new tests:
+    fit() startup-check path, NaN abort, NaN skip.
 - **W&B on air-gapped compute nodes**: `WandBLogger` checked the
   `data-public` extra instead of the `wandb` package itself (wandb is a
   core dependency — logging silently disabled on minimal installs).

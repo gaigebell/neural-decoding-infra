@@ -76,6 +76,20 @@ EOF
 }
 
 # ───────────────────── Launch on each node ─────────────────────
+# Ctrl-C on the mgmt terminal must kill the remote processes too —
+# otherwise half the ranks keep running and the others hang in all_reduce.
+cleanup_remote() {
+    echo ""
+    echo "Interrupted — killing remote training processes..."
+    for NODE in "${NODES[@]}"; do
+        ssh -o StrictHostKeyChecking=no "${NODE}" \
+            "pkill -f 'recon.cli.train' 2>/dev/null || true" &
+    done
+    wait
+    echo "Cleanup done."
+}
+trap cleanup_remote INT TERM
+
 echo "Launching ${WORLD_SIZE} processes on ${NNODES} nodes..."
 PIDS=()
 

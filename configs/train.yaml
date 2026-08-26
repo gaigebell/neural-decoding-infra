@@ -16,6 +16,7 @@ train:
   epochs: 100
   batch_size: 8
   grad_clip: 1.0
+  abort_on_nan: true       # fail fast on non-finite loss instead of burning cluster hours
   amp: true                # automatic mixed precision (bf16/fp16)
   num_workers: 2
   pin_memory: true
