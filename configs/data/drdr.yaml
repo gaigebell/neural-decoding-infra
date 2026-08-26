@@ -6,3 +6,18 @@ n_context: 5        # >0: context-window files + alignment shift; 0: plain (T, C
 layer: 10           # GPT-2 layer
 weights: [0.1, 0.7, 0.5, 0.3]   # delay weights (original pipeline)
 max_stories: 60
+
+# Train/val/test story split — see recon/data/split.py
+#   method: none | ratio | holdout | explicit
+#   ratio:    within-subject decoding (per subject, story granularity)
+#   holdout:  cross-subject generalization (test_subjects held out entirely)
+#   explicit: exact story lists (reproduce legacy [42,12,6])
+split:
+  method: none
+  val_ratio: 0.15      # train gets the remainder (1 - val - test)
+  test_ratio: 0.15
+  seed: 42
+  test_subjects: null   # holdout mode only
+  train_stories: null   # explicit mode only
+  val_stories: null
+  test_stories: null

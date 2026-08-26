@@ -56,6 +56,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `unit/test_evaluator.py` — metrics tests
     - `integration/test_smoke.py` — Tier 0 end-to-end smoke
 
+### Added
+
+- **AMP dtype configuration** (owner-approved): `train.amp_dtype` is
+  `null` (off) | `"bf16"` | `"fp16"`. bf16 needs no GradScaler (RTX 4060:
+  `train.amp_dtype=bf16`); fp16 runs with `torch.amp.GradScaler` and its
+  state is saved/restored in checkpoints; PH402/Pascal keeps `null`
+  (no 16-bit hardware). Legacy `amp: true|false` configs still map.
+- **Story-level train/val/test split** (`recon/data/split.py`):
+  - `method: ratio` — per-subject story split by `val_ratio`/`test_ratio`
+    (fixed seed, floor 1, train gets the remainder) for WITHIN-subject
+    decoding; story granularity prevents temporal leakage.
+  - `method: holdout` — `test_subjects` held out entirely for
+    CROSS-subject generalization (LOSO loop = re-run per subject).
+  - `method: explicit` — exact story lists (legacy `[42,12,6]` replay).
+  - `method: none` — everything trains (backwards-compatible default).
+  - Split summary is logged and written into `run_metadata.json`.
+- **Validation loop**: `Trainer._eval_epoch` (no-grad, all-reduced under
+  DDP) runs every `train.eval_interval`; `best_val.pt` is saved whenever
+  val loss improves; val metrics go to W&B. drdr builders now return
+  real val loaders instead of "No val yet".
+- `tests/unit/test_split.py` (13 tests: ratio/holdout/explicit/seed/
+  boundaries) + fit-level val-loop test. **124 tests pass.**
+
 ### Fixed
 
 - **Stability hardening (P0, owner review round 1)**:

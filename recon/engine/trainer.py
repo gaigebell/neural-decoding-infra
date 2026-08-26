@@ -67,7 +67,10 @@ class TrainConfig:
     epochs: int = 100
     batch_size: int = 32
     grad_clip: float = 1.0
-    amp: bool = True
+    # Automatic mixed precision: None (off), "bf16" (Ampere+ GPUs, no
+    # scaler needed), or "fp16" (with GradScaler). PH402/Pascal has no
+    # 16-bit hardware — keep None on the cluster.
+    amp_dtype: str | None = None
     num_workers: int = 0
     pin_memory: bool = False
     optimizer: str = "adamw"
@@ -125,7 +128,14 @@ class Trainer:
 
         # Build sub-configs (with defaults)
         self.train_cfg = self._extract_train_config(cfg)
-        self.amp_enabled = bool(self.train_cfg.amp) and self.device.type == "cuda"
+        self.amp_dtype = self.train_cfg.amp_dtype
+        self.amp_enabled = self.amp_dtype in ("bf16", "fp16") and self.device.type == "cuda"
+        self._amp_torch_dtype = torch.bfloat16 if self.amp_dtype == "bf16" else torch.float16
+        # GradScaler is only needed for fp16 (bf16 has fp32 dynamic range)
+        # pyright: ignore[reportAttributeAccessIssue] — stub lag; valid in torch>=2.3
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.amp_dtype == "fp16")
+        self._best_val_loss: float | None = None
+        self.split_summary: dict | None = None
 
         # Initialize distributed if multi-GPU / multi-node
         self.is_distributed = world_size > 1
@@ -190,11 +200,15 @@ class Trainer:
         resolved = OmegaConf.to_container(cfg, resolve=True)
         cfg_dict = resolved if isinstance(resolved, dict) else {}
         train_section = cfg_dict.get("train", {})
+        # Backward compat: legacy `amp: true|false` maps to fp16|None
+        if "amp_dtype" not in train_section and "amp" in train_section:
+            train_section["amp_dtype"] = "fp16" if train_section.get("amp") else None
+        amp_dtype = train_section.get("amp_dtype")
         return TrainConfig(
             epochs=int(train_section.get("epochs", 100)),
             batch_size=int(train_section.get("batch_size", 32)),
             grad_clip=float(train_section.get("grad_clip", 1.0)),
-            amp=bool(train_section.get("amp", True)),
+            amp_dtype=str(amp_dtype) if amp_dtype else None,
             num_workers=int(train_section.get("num_workers", 0)),
             pin_memory=bool(train_section.get("pin_memory", False)),
             optimizer=str(train_section.get("optimizer", "adamw")),
@@ -329,6 +343,13 @@ class Trainer:
 
         train_pairs = gen_fake_dataset(n_samples)
         val_pairs = gen_fake_dataset(8) if not self.train_cfg.smoke else None
+        self.split_summary = {
+            "n_train": len(train_pairs),
+            "n_val": len(val_pairs) if val_pairs else 0,
+            "n_test": 0,
+            "val_stories": [],
+            "test_stories": [],
+        }
 
         train_loader = DataLoader(
             _PairDataset(train_pairs),
@@ -351,8 +372,11 @@ class Trainer:
         return train_loader, val_loader
 
     def _build_drdr_meg_dataloaders(self, data_cfg: DictConfig) -> tuple[DataLoader, DataLoader | None]:
-        """Build dataloaders for the DRDR MEG dataset."""
+        """Build dataloaders for the DRDR MEG dataset (train + optional val)."""
+        from omegaconf import OmegaConf
+
         from ..data.drdr import discover_drdr
+        from ..data.split import split_index
 
         processed_root = self.cfg.paths.get("processed_root")
         if not processed_root:
@@ -365,37 +389,40 @@ class Trainer:
             Path(processed_root), modality="meg", max_stories=int(data_cfg.get("max_stories", 60))
         )
         index = _filter_index(index, data_cfg)
+        split_cfg = data_cfg.get("split", OmegaConf.create({"method": "none"}))
+        split = split_index(index, split_cfg)
+        self.split_summary = split.summary()
 
         n_context = int(data_cfg.get("n_context", 5))
         weights = tuple(float(w) for w in data_cfg.get("weights", [0.1, 0.7, 0.5, 0.3]))
         max_steps = int(self.train_cfg.max_steps_per_epoch) if self.train_cfg.smoke else None
         train_ds = MEGDataset(
-            index,
+            _make_sub_index(index, split.train),
             n_context=n_context,
             layer=int(data_cfg.get("layer", 10)),
             weights=weights,
             max_steps_per_story=max_steps,
         )
-        train_sampler = (
-            DistributedSampler(train_ds, num_replicas=self.world_size, rank=self.rank)
-            if self.is_distributed
-            else None
-        )
-        train_loader = DataLoader(
-            train_ds,
-            batch_size=self.train_cfg.batch_size,
-            shuffle=(train_sampler is None),
-            num_workers=self._num_workers,
-            pin_memory=self.train_cfg.pin_memory,
-            sampler=train_sampler,
-            collate_fn=collate_brain_stim_pairs,
-        )
-        # No val yet — owner will add when needed
-        return train_loader, None
+        train_loader = self._make_loader(train_ds, shuffle=True)
+
+        val_loader = None
+        if split.val:
+            val_ds = MEGDataset(
+                _make_sub_index(index, split.val),
+                n_context=n_context,
+                layer=int(data_cfg.get("layer", 10)),
+                weights=weights,
+                max_steps_per_story=max_steps,
+            )
+            val_loader = self._make_loader(val_ds, shuffle=False)
+        return train_loader, val_loader
 
     def _build_drdr_fmri_dataloaders(self, data_cfg: DictConfig) -> tuple[DataLoader, DataLoader | None]:
-        """Build dataloaders for the DRDR fMRI dataset."""
+        """Build dataloaders for the DRDR fMRI dataset (train + optional val)."""
+        from omegaconf import OmegaConf
+
         from ..data.drdr import discover_drdr
+        from ..data.split import split_index
 
         processed_root = self.cfg.paths.get("processed_root")
         if not processed_root:
@@ -408,31 +435,49 @@ class Trainer:
             Path(processed_root), modality="fmri", max_stories=int(data_cfg.get("max_stories", 60))
         )
         index = _filter_index(index, data_cfg)
+        split_cfg = data_cfg.get("split", OmegaConf.create({"method": "none"}))
+        split = split_index(index, split_cfg)
+        self.split_summary = split.summary()
 
         weights = tuple(float(w) for w in data_cfg.get("weights", [0.1, 0.7, 0.5, 0.3]))
         max_steps = int(self.train_cfg.max_steps_per_epoch) if self.train_cfg.smoke else None
         train_ds = fMRIDataset(
-            index,
+            _make_sub_index(index, split.train),
             layer=int(data_cfg.get("layer", 10)),
             weights=weights,
             mask_path=data_cfg.get("mask_path"),
             max_steps_per_story=max_steps,
         )
-        train_sampler = (
-            DistributedSampler(train_ds, num_replicas=self.world_size, rank=self.rank)
+        train_loader = self._make_loader(train_ds, shuffle=True)
+
+        val_loader = None
+        if split.val:
+            val_ds = fMRIDataset(
+                _make_sub_index(index, split.val),
+                layer=int(data_cfg.get("layer", 10)),
+                weights=weights,
+                mask_path=data_cfg.get("mask_path"),
+                max_steps_per_story=max_steps,
+            )
+            val_loader = self._make_loader(val_ds, shuffle=False)
+        return train_loader, val_loader
+
+    def _make_loader(self, dataset: Dataset, shuffle: bool) -> DataLoader:
+        """Shared DataLoader construction (sampler + collate)."""
+        sampler = (
+            DistributedSampler(dataset, num_replicas=self.world_size, rank=self.rank)
             if self.is_distributed
             else None
         )
-        train_loader = DataLoader(
-            train_ds,
+        return DataLoader(
+            dataset,
             batch_size=self.train_cfg.batch_size,
-            shuffle=(train_sampler is None),
+            shuffle=(shuffle and sampler is None),
             num_workers=self._num_workers,
             pin_memory=self.train_cfg.pin_memory,
-            sampler=train_sampler,
+            sampler=sampler,
             collate_fn=collate_brain_stim_pairs,
         )
-        return train_loader, None
 
     # ───────────────────── Training loop ─────────────────────
 
@@ -492,6 +537,30 @@ class Trainer:
                         step=epoch,
                     )
                     self.wandb.log({"train/lr": self.optimizer.param_groups[0]["lr"]}, step=epoch)
+
+                # Validation
+                if val_loader is not None and (epoch + 1) % self.train_cfg.eval_interval == 0:
+                    val_metrics = self._eval_epoch(val_loader)
+                    logger.info(
+                        "Val epoch %d: loss=%.4f (cos=%.4f, mse=%.4f)",
+                        epoch + 1,
+                        val_metrics.get("total_loss", 0.0),
+                        val_metrics.get("cosine_loss", 0.0),
+                        val_metrics.get("mse_loss", 0.0),
+                    )
+                    if self.wandb and self.wandb.enabled:
+                        self.wandb.log(
+                            {f"val/{k}": v for k, v in val_metrics.items()}, step=epoch
+                        )
+                    # Best-val checkpoint
+                    if self._best_val_loss is None or val_metrics["total_loss"] < self._best_val_loss:
+                        self._best_val_loss = val_metrics["total_loss"]
+                        if self.rank == 0:
+                            self.save_checkpoint(epoch, val_metrics, name="best_val.pt")
+                            logger.info(
+                                "New best val loss %.4f — saved best_val.pt",
+                                self._best_val_loss,
+                            )
 
                 # Save checkpoint
                 if (epoch + 1) % self.train_cfg.save_interval == 0 and self.rank == 0:
@@ -579,7 +648,7 @@ class Trainer:
         brain_x = batch.brain.x.to(self.device)
         stim_zstim = batch.stim.zstim.to(self.device)
         ctx = (
-            torch.autocast(device_type="cuda", dtype=torch.float16)
+            torch.autocast(device_type="cuda", dtype=self._amp_torch_dtype)
             if self.amp_enabled
             else nullcontext()
         )
@@ -630,6 +699,7 @@ class Trainer:
                 "name": data_cfg.get("name") if isinstance(data_cfg, dict) else str(data_cfg),
                 "subjects": data_cfg.get("subjects") if isinstance(data_cfg, dict) else None,
                 "stories": data_cfg.get("stories") if isinstance(data_cfg, dict) else None,
+                "split": self.split_summary,
                 "n_train_samples": n_train,
                 "batch_size": self.train_cfg.batch_size,
                 "steps_per_epoch": len(train_loader),
@@ -692,7 +762,7 @@ class Trainer:
             # = 3072); models predict the first delay's embedding
             # (semantic_dim = pred.shape[-1]), so slice the target.
             ctx = (
-                torch.autocast(device_type="cuda", dtype=torch.float16)
+                torch.autocast(device_type="cuda", dtype=self._amp_torch_dtype)
                 if self.amp_enabled
                 else nullcontext()
             )
@@ -716,15 +786,25 @@ class Trainer:
                 logger.warning("Skipping non-finite step (abort_on_nan=false)")
                 continue
 
-            # Backward
+            # Backward. fp16 uses GradScaler (bf16/None don't need it).
             self.optimizer.zero_grad()
-            loss.backward()
             grad_norm = float("nan")
-            if self.train_cfg.grad_clip > 0:
-                grad_norm = float(
-                    nn.utils.clip_grad_norm_(self.model.parameters(), self.train_cfg.grad_clip)
-                )
-            self.optimizer.step()
+            if self.scaler.is_enabled():
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                if self.train_cfg.grad_clip > 0:
+                    grad_norm = float(
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.train_cfg.grad_clip)
+                    )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                if self.train_cfg.grad_clip > 0:
+                    grad_norm = float(
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.train_cfg.grad_clip)
+                    )
+                self.optimizer.step()
 
             # Accumulate
             for k, v in loss_dict.items():
@@ -745,6 +825,45 @@ class Trainer:
         if n_batches == 0:
             return {"total_loss": 0.0, "cosine_loss": 0.0, "mse_loss": 0.0}
         return {k: v / n_batches for k, v in running.items()}
+
+    def _eval_epoch(self, val_loader: DataLoader) -> dict[str, float]:
+        """Evaluate one pass over the validation set (no gradients).
+
+        Metrics are averaged over batches and all-reduced across ranks
+        under DDP (each rank sees a different data shard).
+        """
+        self.model.eval()
+        running: dict[str, float] = {}
+        n_batches = 0
+        ctx = (
+            torch.autocast(device_type="cuda", dtype=self._amp_torch_dtype)
+            if self.amp_enabled
+            else nullcontext()
+        )
+        with torch.no_grad():
+            for batch in val_loader:
+                brain_x = batch.brain.x.to(self.device)
+                stim_zstim = batch.stim.zstim.to(self.device)
+                with ctx:
+                    pred, aux = self._model_forward(brain_x)
+                    target = stim_zstim[..., : pred.shape[-1]]
+                    _, loss_dict = self._model_compute_loss(pred, target, aux)
+                for k, v in loss_dict.items():
+                    running[k] = running.get(k, 0.0) + v
+                n_batches += 1
+        self.model.train()
+
+        if n_batches == 0:
+            return {"total_loss": 0.0}
+        metrics = {k: v / n_batches for k, v in running.items()}
+
+        if self.is_distributed and torch.distributed.is_initialized():
+            keys = sorted(metrics)
+            tens = torch.tensor([metrics[k] for k in keys], device=self.device)
+            torch.distributed.all_reduce(tens)
+            tens = tens / self.world_size
+            metrics = {k: float(v) for k, v in zip(keys, tens.tolist())}
+        return metrics
 
     def _model_forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Any]:
         """Forward pass through the (possibly DDP-wrapped) model.
@@ -780,11 +899,18 @@ class Trainer:
 
     # ───────────────────── Checkpointing ─────────────────────
 
-    def save_checkpoint(self, epoch: int, metrics: dict[str, float]) -> Path:
-        """Save a checkpoint to the configured directory."""
+    def save_checkpoint(
+        self, epoch: int, metrics: dict[str, float], name: str | None = None
+    ) -> Path:
+        """Save a checkpoint to the configured directory.
+
+        Args:
+            name: Optional explicit filename (e.g. ``"best_val.pt"``);
+                defaults to ``checkpoint_epoch_{epoch}.pt``.
+        """
         ckpt_dir = Path(self.train_cfg.ckpt_dir.replace("${run_id}", os.environ.get("RUN_ID", f"epoch_{epoch}")))
         ckpt_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_path = ckpt_dir / f"checkpoint_epoch_{epoch}.pt"
+        ckpt_path = ckpt_dir / (name or f"checkpoint_epoch_{epoch}.pt")
 
         # Get state dict (unwrap DDP if needed)
         model_state = (
@@ -796,6 +922,7 @@ class Trainer:
                 "model_state_dict": model_state,
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "scheduler_state_dict": self.scheduler.state_dict() if self.scheduler else None,
+                "scaler_state_dict": self.scaler.state_dict(),
                 "metrics": metrics,
                 "config": OmegaConf.to_container(self.cfg, resolve=True),
             },
@@ -821,6 +948,8 @@ class Trainer:
         model_for_load = self.model.module if hasattr(self.model, "module") else self.model
         model_for_load.load_state_dict(ckpt["model_state_dict"])
         self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        if "scaler_state_dict" in ckpt:
+            self.scaler.load_state_dict(ckpt["scaler_state_dict"])
         if self.scheduler and ckpt.get("scheduler_state_dict"):
             self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         logger.info("Loaded checkpoint from %s (epoch %d)", path, ckpt.get("epoch", 0))
@@ -847,6 +976,24 @@ class _InfiniteIterator:
         except StopIteration:
             self._it = iter(self._base)
             return next(self._it)
+
+
+def _make_sub_index(index: DRDRIndex, pairs: list[tuple[int, int]]) -> DRDRIndex:
+    """Build a DRDRIndex restricted to the given (subject, story) pairs."""
+    by_subject: dict[int, list[int]] = {}
+    by_story: dict[int, list[int]] = {}
+    for s, st in pairs:
+        by_subject.setdefault(s, []).append(st)
+        by_story.setdefault(st, []).append(s)
+    return DRDRIndex(
+        processed_root=index.processed_root,
+        modality=index.modality,
+        subjects=sorted(by_subject),
+        stories=sorted(by_story),
+        by_subject=by_subject,
+        by_story=by_story,
+        pairs=pairs,
+    )
 
 
 def _filter_index(index: DRDRIndex, data_cfg: DictConfig) -> DRDRIndex:

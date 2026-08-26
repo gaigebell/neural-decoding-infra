@@ -153,7 +153,7 @@ def test_trainer_runs_one_step_with_fake_data():
             "train": {
                 "epochs": 1,
                 "batch_size": 2,
-                "amp": False,
+                "amp_dtype": None,
                 "num_workers": 0,
                 "max_steps_per_epoch": 2,
                 "log_interval": 1,
@@ -193,7 +193,7 @@ def _smoke_cfg(tmp_path: Path):
             "train": {
                 "epochs": 1,
                 "batch_size": 2,
-                "amp": False,
+                "amp_dtype": None,
                 "num_workers": 0,
                 "max_steps_per_epoch": 2,
                 "log_interval": 1,
@@ -264,6 +264,22 @@ def test_nan_loss_skips_when_disabled(tmp_path: Path, monkeypatch):
     metrics = trainer._train_epoch(train_loader, epoch=0)
     # All steps were skipped -> no batches accumulated -> default metrics
     assert metrics["total_loss"] == 0.0
+
+
+def test_fit_with_val_loop_saves_best(tmp_path: Path):
+    """Non-smoke fit() must run validation and save best_val.pt."""
+    from recon.engine.trainer import Trainer
+
+    cfg = _smoke_cfg(tmp_path)
+    cfg.train.smoke = False  # fake builder then creates a val set (8 pairs)
+    cfg.train.eval_interval = 1
+    trainer = Trainer(cfg, rank=0, world_size=1)
+    trainer.fit()
+
+    ckpt_dir = Path(trainer.train_cfg.ckpt_dir)
+    assert (ckpt_dir / "best_val.pt").exists()
+    assert trainer._best_val_loss is not None
+    assert trainer._best_val_loss > 0
 
 
 # ───────────────────── Test 6: Config composition ─────────────────────

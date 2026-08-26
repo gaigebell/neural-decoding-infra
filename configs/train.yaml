@@ -17,7 +17,8 @@ train:
   batch_size: 8
   grad_clip: 1.0
   abort_on_nan: true       # fail fast on non-finite loss instead of burning cluster hours
-  amp: true                # automatic mixed precision (bf16/fp16)
+  amp_dtype: null          # null | bf16 | fp16. bf16 for RTX 4060 (train.amp_dtype=bf16);
+                           # keep null on PH402/Pascal (no 16-bit hardware)
   num_workers: 2
   pin_memory: true
   optimizer: adamw          # adamw, adam, sgd
