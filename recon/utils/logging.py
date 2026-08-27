@@ -156,9 +156,6 @@ class WandBLogger:
         if not self._enabled or self._run is None:
             return
 
-        # Lazy import
-        import wandb  # noqa: PLC0415
-
         # Convert tensors/numpy to plain Python
         clean: dict[str, Any] = {}
         for k, v in metrics.items():
@@ -166,7 +163,11 @@ class WandBLogger:
                 v = v.item()
             clean[k] = v
 
-        wandb.log(clean, step=step, commit=commit)
+        # Log via the Run OBJECT (not module-level wandb.log): the
+        # module-level call depends on wandb's global active-run state,
+        # which silently dropped later same-step log calls (val curves
+        # missing from the dashboard, 2026-08-27).
+        self._run.log(clean, step=step, commit=commit)
         self._log_count += 1
 
     def log_artifact(
@@ -219,8 +220,7 @@ class WandBLogger:
         """Finish the WandB run. Idempotent."""
         if not self._enabled or self._run is None:
             return
-        import wandb  # noqa: PLC0415
-        wandb.finish()
+        self._run.finish()
         get_logger(__name__).info(
             "WandB run finished. Logged %d metric groups.", self._log_count
         )

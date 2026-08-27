@@ -70,6 +70,7 @@ build_cmd() {
     shift 2  # consume rank+local_rank; "$@" below is now ONLY the hydra overrides
     cat <<EOF
 cd ${REPO_ROOT} && \
+conda activate ndinf && \
 RANK=${rank} \
 LOCAL_RANK=${local_rank} \
 MASTER_ADDR=${MASTER_ADDR} \

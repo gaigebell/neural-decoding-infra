@@ -538,15 +538,8 @@ class Trainer:
                     epoch_time,
                 )
 
-                # Log to WandB
-                if self.wandb and self.wandb.enabled:
-                    self.wandb.log(
-                        {f"train/{k}": v for k, v in train_metrics.items()},
-                        step=epoch,
-                    )
-                    self.wandb.log({"train/lr": self.optimizer.param_groups[0]["lr"]}, step=epoch)
-
                 # Validation
+                val_metrics: dict[str, float] | None = None
                 if val_loader is not None and (epoch + 1) % self.train_cfg.eval_interval == 0:
                     val_metrics = self._eval_epoch(val_loader)
                     logger.info(
@@ -556,10 +549,6 @@ class Trainer:
                         val_metrics.get("cosine_loss", 0.0),
                         val_metrics.get("mse_loss", 0.0),
                     )
-                    if self.wandb and self.wandb.enabled:
-                        self.wandb.log(
-                            {f"val/{k}": v for k, v in val_metrics.items()}, step=epoch
-                        )
                     # Best-val checkpoint
                     if self._best_val_loss is None or val_metrics["total_loss"] < self._best_val_loss:
                         self._best_val_loss = val_metrics["total_loss"]
@@ -569,6 +558,16 @@ class Trainer:
                                 "New best val loss %.4f — saved best_val.pt",
                                 self._best_val_loss,
                             )
+
+                # Log to WandB — ONE merged call per epoch. Separate
+                # same-step calls get dropped from wandb's summary
+                # (val curves missing from the dashboard, 2026-08-27).
+                if self.wandb and self.wandb.enabled:
+                    merged = {f"train/{k}": v for k, v in train_metrics.items()}
+                    merged["train/lr"] = self.optimizer.param_groups[0]["lr"]
+                    if val_metrics is not None:
+                        merged.update({f"val/{k}": v for k, v in val_metrics.items()})
+                    self.wandb.log(merged, step=epoch)
 
                 # Save checkpoint
                 if (epoch + 1) % self.train_cfg.save_interval == 0 and self.rank == 0:
