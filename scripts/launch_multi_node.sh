@@ -36,10 +36,16 @@ MASTER_NODE=${NODES[0]}
 # ${now:...} independently -> inconsistent ckpt/wandb dirs)
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 
-# Resolve master addr dynamically from the master node
-echo "Resolving master addr from ${MASTER_NODE}..."
-MASTER_ADDR=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "${MASTER_NODE}" \
-    "hostname -I | awk '{print \$1}'" 2>/dev/null || echo "")
+# Master address — env override wins, otherwise use the master node's
+# HOSTNAME, exactly like the old working pipeline
+# (fMRI3dCIB2_train_mn.py: master_addr='gn11'): every node resolves the
+# hostname via /etc/hosts to the compute-network IP. Do NOT use
+# `hostname -I | awk '{print $1}'` — the first interface is often the
+# management NIC other nodes cannot route to ("No route to host").
+if [[ -z "${MASTER_ADDR:-}" ]]; then
+    MASTER_ADDR="${MASTER_NODE}"
+fi
+echo "MASTER_ADDR=${MASTER_ADDR} (hostname, resolved via /etc/hosts on each node)"
 
 if [[ -z "${MASTER_ADDR}" ]]; then
     echo "ERROR: Could not resolve MASTER_ADDR from ${MASTER_NODE}" >&2
@@ -61,6 +67,7 @@ echo ""
 build_cmd() {
     local rank=$1
     local local_rank=$2
+    shift 2  # consume rank+local_rank; "$@" below is now ONLY the hydra overrides
     cat <<EOF
 cd ${REPO_ROOT} && \
 RANK=${rank} \
@@ -72,9 +79,8 @@ RUN_ID=${RUN_ID} \
 WANDB_MODE=${WANDB_MODE:-offline} \
 NCCL_DEBUG=${NCCL_DEBUG:-INFO} \
 NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1} \
-NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-} \
+NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-p5p1} \
 python -m recon.cli.train \
-  --config-path=configs \
   paths=cluster \
   $@
 EOF

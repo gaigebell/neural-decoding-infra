@@ -183,8 +183,16 @@ class Trainer:
         """
         os.environ["MASTER_ADDR"] = self.master_addr
         os.environ["MASTER_PORT"] = str(self.master_port)
+        # Cluster networking, ported from the old working multi-node
+        # pipeline (fMRI3dCIB2_train_mn.py): pin the NCCL data plane to
+        # the 10GbE interface (p5p1) and disable InfiniBand (not present).
+        # setdefault: explicit env overrides win; harmless when NCCL is
+        # never initialized (single-GPU / CPU).
+        os.environ.setdefault("NCCL_SOCKET_IFNAME", "p5p1")
+        os.environ.setdefault("NCCL_IB_DISABLE", "1")
         torch.distributed.init_process_group(
             backend="nccl" if self.device.type == "cuda" else "gloo",
+            init_method="env://",
             rank=self.rank,
             world_size=self.world_size,
             timeout=datetime.timedelta(minutes=10),

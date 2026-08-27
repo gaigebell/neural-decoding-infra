@@ -278,8 +278,8 @@ MASTER_PORT=29500            # DDP 握手端口（节点间要互通）
 | `MASTER_ADDR` / `MASTER_PORT` | 握手地址/端口 | 脚本（master 节点 IP） |
 | `RUN_ID` | 统一运行名（ckpt/wandb 目录一致） | 脚本 |
 | `WANDB_MODE` | `offline`（计算节点无网） | 脚本默认 |
-| `NCCL_IB_DISABLE` | `1`（无 InfiniBand） | 脚本默认 |
-| `NCCL_SOCKET_IFNAME` | 万兆网卡名（多网卡时设） | 按需 |
+| `NCCL_IB_DISABLE` | `1`（无 InfiniBand） | 脚本/trainer 默认 |
+| `NCCL_SOCKET_IFNAME` | 万兆网卡名，集群为 `p5p1`（旧管线验证值） | 脚本/trainer 默认 |
 
 torchrun 会自动注入 RANK/LOCAL_RANK/WORLD_SIZE/MASTER_*，所以**单节点多卡直接 torchrun，只有跨节点才需要这个脚本**。
 
