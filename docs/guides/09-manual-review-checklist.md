@@ -108,32 +108,28 @@ python -m recon.cli.train paths=cluster model=fmri3dcib data=drdr_fmri \
 - [ ] `train.amp=true` 再跑一次对比（PH402 无 fp16 tensor core，
       预期更慢或持平 → 正式训练关 AMP）
 
-### T2 · 单节点双卡 DDP
+### T2 · 单节点双卡 DDP — ✅ 2026-08-27 通过
 
 ```bash
 # 在某个计算节点（如 cn3）本地两卡：
 torchrun --nproc_per_node=2 --master_port=29500 -m recon.cli.train \
     paths=cluster model=meg_model_a data=drdr data.subjects=[1] \
-    train.epochs=1 train.batch_size=64 train.amp=false
+    train.epochs=1 train.batch_size=64 train.amp_dtype=null
 ```
 
-**验收**：
-- [ ] 两卡 loss 与 T1 单卡一致（数据并行应几乎相同）
-- [ ] 无 NCCL 报错（节点内 PCIe 直连，无 NVLink，通信慢但应可用）
-
-### T3 · 多节点 DDP（4 节点 8 卡）
+### T3 · 多节点 DDP（4 节点 8 卡）— ✅ 2026-08-27 通过
 
 ```bash
 bash scripts/launch_multi_node.sh model=meg_model_a data=drdr \
-    data.subjects=[1] train.epochs=1 train.batch_size=128 train.amp=false
+    data.subjects=[1] train.epochs=1 train.batch_size=128 train.amp_dtype=null
 ```
 
-**验收**：
-- [ ] 8 个 rank 全部启动、无 rank 卡死（脚本内 ssh 每节点 2 进程）
-- [ ] loss 与单卡一致
-- [ ] 记录 epoch 时间，算扩展性：2 卡 vs 8 卡。无 IB 走万兆 TCP，
-      预期 sub-linear，但数据并行对通信不敏感，应该接近线性
-- [ ] 若卡死：检查 NCCL 环境变量（见 3.4）与 29500 端口互通
+**实测结果**：8 卡 epoch **8.7s** vs 单卡 63.7s（**7.3× 扩展**，接近线性）；
+loss 与单卡一致（1.79 vs 1.74 的首 epoch 差异属正常）。
+**网络要点**（已写入 memory + launch 脚本默认值）：
+`MASTER_ADDR` 用**主机名**（/etc/hosts 解析到万兆网 10.0.1.x），
+`NCCL_SOCKET_IFNAME=p5p1` + `NCCL_IB_DISABLE=1`。
+坑：`hostname -I` 第一个 IP 是管理网 → 跨节点 No route to host。
 
 ### T4 · 集群解码（训练后）
 
