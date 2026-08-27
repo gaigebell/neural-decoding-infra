@@ -126,3 +126,7 @@ docs/_build/
 # *.h5 filter=lfs diff=lfs merge=lfs -text
 # Local test artifacts
 tests/tmp_results/
+
+# CLI outputs
+logs/
+decoded/

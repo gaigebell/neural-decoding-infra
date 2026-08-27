@@ -1,6 +1,9 @@
 # Guide 06: Run decoding
 
 > **Audience**: Anyone running inference / decoding on a trained model.
+>
+> ⚠️ **2026-08-26**: 解码 CLI 与解码器语义已重写（beam/layer-10 特征/
+> 参数表），请以 **[10-user-manual.md](10-user-manual.md)** 第 5 节为准。
 
 ---
 

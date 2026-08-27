@@ -56,6 +56,7 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/):
 - [Run decoding](guides/06-run-decoding.md)
 - [Run evaluation](guides/07-run-evaluation.md)
 - [Debug checklist](guides/08-debug-checklist.md)
+- [**用户手册：训练与解码全流程**](guides/10-user-manual.md)（当前用法的唯一入口，含配置字段大全）
 
 ### 📅 Development logs
 - [Week 0 (2026-07-28): Bootstrap](dev-logs/2026-07-28-week-00-bootstrap.md)

@@ -1,6 +1,10 @@
 # Guide 04: Run training
 
 > **Audience**: Anyone running a training experiment.
+>
+> ⚠️ **2026-08-26**: 训练用法已全面更新（划分/AMP/val loop/启动检查），
+> 请以 **[10-user-manual.md](10-user-manual.md)** 为准；本文保留集群操作
+> 细节（tmux/nohup 等）作为补充。
 
 ---
 

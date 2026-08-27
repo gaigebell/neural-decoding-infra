@@ -32,6 +32,10 @@ NNODES=${#NODES[@]}
 WORLD_SIZE=$((NNODES * GPUS_PER_NODE))
 MASTER_NODE=${NODES[0]}
 
+# One RUN_ID for the WHOLE job (each rank otherwise resolves
+# ${now:...} independently -> inconsistent ckpt/wandb dirs)
+RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
+
 # Resolve master addr dynamically from the master node
 echo "Resolving master addr from ${MASTER_NODE}..."
 MASTER_ADDR=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "${MASTER_NODE}" \
@@ -64,6 +68,7 @@ LOCAL_RANK=${local_rank} \
 MASTER_ADDR=${MASTER_ADDR} \
 MASTER_PORT=${MASTER_PORT} \
 WORLD_SIZE=${WORLD_SIZE} \
+RUN_ID=${RUN_ID} \
 WANDB_MODE=${WANDB_MODE:-offline} \
 NCCL_DEBUG=${NCCL_DEBUG:-INFO} \
 NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1} \

@@ -2,12 +2,14 @@
 # scripts/smoke.sh — Run cluster smoke tests at various tiers.
 #
 # Usage:
-#   bash scripts/smoke.sh --tier=L0          # Tier 0: fake data, 1 node (CPU or 1 GPU)
-#   bash scripts/smoke.sh --tier=L1          # Tier 1: real data, 1 node (1 GPU)
-#   bash scripts/smoke.sh --tier=L2          # Tier 2: real data, 2 nodes (2 GPU DDP)
+#   bash scripts/smoke.sh --tier=L0          # Tier 0: fake data, 1 node
+#   bash scripts/smoke.sh --tier=L1          # Tier 1: real data (sub 1), 1 node, 1 GPU
+#   bash scripts/smoke.sh --tier=L2          # Tier 2: real data, 4 nodes, 8 GPU DDP
 #   bash scripts/smoke.sh --tier=all         # Run all tiers
 #
 # See docs/standards/04-testing.md for tier definitions.
+# Modality pairing: model=meg_model_a ↔ data=drdr (MEG);
+#                   model=fmri3dcib   ↔ data=drdr_fmri (fMRI cube).
 
 set -euo pipefail
 
@@ -35,44 +37,48 @@ done
 
 cd "${REPO_ROOT}"
 
-# ───────────────────── Tier 0: Fake data, 1 GPU, no cluster ─────────────────────
+# ───────────────────── Tier 0: Fake data, 1 node ─────────────────────
 run_tier0() {
-    echo "=== Tier 0: fake data, 1 node, 1 GPU ==="
+    echo "=== Tier 0: fake data, 1 node ==="
     python -m recon.cli.train \
-        --config-path=configs \
         paths=cluster \
-        model=fmri3dcib \
+        model=meg_model_a \
         data=fake \
         train.smoke=true \
-        train.epochs=1 \
-        train.batch_size=2 \
-        train.amp=false \
+        train.amp_dtype=null \
+        logging.wandb_mode=offline \
         2>&1 | tee "${LOG_DIR}/smoke_tier0.log"
 }
 
 # ───────────────────── Tier 1: Real data, 1 GPU ─────────────────────
 run_tier1() {
-    echo "=== Tier 1: real data (1 subject), 1 node, 1 GPU ==="
+    echo "=== Tier 1: real data (sub 1 MEG), 1 node, 1 GPU ==="
     python -m recon.cli.train \
-        --config-path=configs \
         paths=cluster \
-        model=fmri3dcib \
+        model=meg_model_a \
         data=drdr \
         data.subjects=[1] \
+        data.split.method=ratio \
         train.epochs=1 \
-        train.batch_size=8 \
+        train.batch_size=64 \
+        train.amp_dtype=null \
+        train.eval_interval=1 \
+        train.save_interval=1 \
+        logging.wandb_mode=offline \
         2>&1 | tee "${LOG_DIR}/smoke_tier1.log"
 }
 
-# ───────────────────── Tier 2: Real data, 2 nodes, DDP ─────────────────────
+# ───────────────────── Tier 2: Real data, multi-node DDP ─────────────────────
 run_tier2() {
-    echo "=== Tier 2: real data (2 subjects), 2 nodes, 4 GPU DDP ==="
+    echo "=== Tier 2: real data (sub 1 MEG), 4 nodes, 8 GPU DDP ==="
     bash "${SCRIPT_DIR}/launch_multi_node.sh" \
-        model=fmri3dcib \
+        model=meg_model_a \
         data=drdr \
-        data.subjects=[1,2] \
+        data.subjects=[1] \
+        data.split.method=ratio \
         train.epochs=1 \
-        train.batch_size=16 \
+        train.batch_size=128 \
+        train.amp_dtype=null \
         2>&1 | tee "${LOG_DIR}/smoke_tier2.log"
 }
 

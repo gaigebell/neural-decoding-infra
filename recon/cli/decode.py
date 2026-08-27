@@ -203,8 +203,7 @@ def main() -> None:
     logger.info("Decoded %d characters", len(text))
 
     out_path = Path(
-        args.output
-        or f"tests/tmp_results/decoded/sub{args.subject}_story{args.story}.txt"
+        args.output or f"decoded/sub{args.subject}_story{args.story}.txt"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(text, encoding="utf-8")
