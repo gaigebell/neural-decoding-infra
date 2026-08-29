@@ -1,7 +1,8 @@
 # 下一阶段计划：预处理管线重构与集群部署
 
-> **Status**: 2026-08-27 起草，供 owner 审阅。目标：预处理管线整合进框架 →
-> 集群部署 → 全被试预处理 → 全被试 MEG model A 训练。
+> **Status**: 2026-08-27 v2（owner 已确认 5 个问题 + 设计讨论定稿，见
+> [data-pipeline-design.md](data-pipeline-design.md)）。目标：预处理管线
+> 整合进框架 → 集群部署 → 全被试预处理 → 全被试 MEG model A 训练。
 
 ---
 
@@ -12,8 +13,9 @@
 | MEG 特征处理器 | `process_brain_feature.py`（714 行） | fif → zresp：306 通道选择(12:318)、z-score、0.4s 窗口/100Hz 采样 | 三个类（BrainFeatureProcessor / MEGFeatureProcessor / BrainOmniFeatureProcessor），路径硬编码 |
 | BrainOmni 路径 | `prepipeline.py` | 12 被试循环跑 `brainomni_process(sr=256, seg=2)` | 依赖 `BrainOmni.brainomni.model` 包 + 两个 checkpoint（`BrainTokenizer.pt`/`BrainOmni.pt`/`model_cfg.json`）——**权重位置待确认** |
 | 语义特征对齐 | `process_semantic_feature.py` | wordvectors → lanczos 降采样（12s 首字、0.4s 网格）→ 4 delays → zstim | 依赖 `E:/results/wordvectors/story*_{layer}.npy` |
-| **GPT-2 字符特征提取** | **缺失** | 生成 wordvectors 的脚本不在仓库 | 🔴 需找回或重写（transformers 几十行） |
-| fMRI cube | 待定位（`process_brain_feature.py` 有 nibabel 基类；cube 生成脚本未确认） | nii → (T, 91, 109, 91) | 🔴 需找回 |
+| **GPT-2 字符特征提取** | ✅ 已找回：`brainread/v0/embed.py`（GPT2LMHeadModel 全层 0-12） | 生成 wordvectors | 待重构进框架 |
+| fMRI cube | ✅ 已找回：`brainread/v0/dataproc/fMRI/getzresp.py`（nibabel → linear/cube） | nii → (T, 91, 109, 91) | 待重构进框架 |
+| BrainOmni | ✅ `D:/allforwork/Liu_Lab/_Reconstruction/BrainOmni-main/`（代码 + `ckpt_collection/` 权重均在本地） | 编码器路径 | 作为 extra 接线 |
 | 杂项 | `main_datagen.py`、`extract_semantic_feature.py`（BERT 旧路径） | 编排/旧特征 | english 剔除字典在 3 个文件里重复 |
 
 **旧管线的系统性缺陷**（重构要解决的）：
@@ -80,12 +82,19 @@
 - 预处理进度面板（复用训练监控的 NFS 日志方案）
 - val 曲线已在 wandb 修复（`ec1a69c`）；补 grad/GPU 利用率面板
 
-## 5. 需要 owner 确认的问题
+## 5. Owner 确认结果（2026-08-27）
 
-1. **BrainOmni 权重和代码仓库在哪里**？（brainomni 路径接不接进 Phase 1）
-2. **fMRI cube 生成脚本**是否还在别处（笔记本/服务器）？找不到就按
-   `process_brain_feature.py` 的 nibabel 逻辑重写
-3. **编排工具选型**：自研轻量 runner（推荐，依赖最少）vs Snakemake
-4. **其他被试的原始 fif 数据**集群上是否齐全（`mydata/sub-0X/MEG/`）？
-   还是需要从 E 盘补传
-5. 旧 `E:/results` 产物是否作为"黄金标准"保留只读（建议是，等价性验证全靠它）
+1. ✅ BrainOmni 在 `BrainOmni-main/`（本地，含权重）→ Phase 1 作为 extra 接线
+2. ✅ fMRI cube 脚本在 `brainread/v0/dataproc/fMRI/`，GPT-2 特征在
+   `brainread/v0/embed.py` → 均待重构
+3. ✅ 编排 = **自研轻量 runner**（文件系统状态机 + ssh 分发，与训练侧
+   launch 脚本同模式；规则数据化保留 Snakemake 升级路径）——理由见设计文档
+4. ✅ 集群原始 fif 已齐全（12 被试），无需补传
+5. ✅ 格式 = BIDS-derivatives 风格 + 产物 sidecar（`*.meta.json`：输入
+   hash + 参数 + 代码 commit）；zresp 按编码器分层（`classic/`、
+   `brainomni_v1/`）；E:/results 只读保留作黄金标准
+
+**设计细节全在 [data-pipeline-design.md](data-pipeline-design.md)**：
+三层分离（编排/格式/计算）、业界方案对比、预处理边界（重预处理继承
+BIDS、特征提取进管线、编码缓存落盘）、BrainOmni token 缓存利弊、
+论文阅读清单。
