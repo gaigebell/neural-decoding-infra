@@ -1,0 +1,57 @@
+# Preprocessing pipeline config — `python -m recon.cli.preprocess`.
+#
+# Stage examples:
+#   python -m recon.cli.preprocess stage=gpt_char_features subject=1 stories=[1]
+#   python -m recon.cli.preprocess stage=semantic_downsample subject=1 stories=[1]
+#   python -m recon.cli.preprocess stage=semantic_delay subject=1 stories=[1]
+#   python -m recon.cli.preprocess stage=meg_zresp subject=1 stories=[1]
+#   python -m recon.cli.preprocess stage=meg_context subject=1 stories=[1] n_context=5
+#   python -m recon.cli.preprocess stage=fmri_cube subject=1 stories=[1]
+#
+# Re-runs skip artifacts whose sidecar matches (input hashes + params).
+
+defaults:
+  - paths: local
+  - _self_
+
+# Task selection
+stage: null            # gpt_char_features | semantic_downsample | semantic_delay | meg_zresp | meg_context | fmri_cube
+subject: 1
+stories: null          # null = 1..60
+resume: true           # skip artifacts with valid sidecars
+
+# Shared parameters (values are the legacy pipeline's — keep for equivalence)
+layer: 10              # GPT-2 layer for zstim/features
+layers: [10]           # layers to extract in gpt_char_features (legacy ran 0..12)
+interval: 0.4          # MEG sampling grid (s)
+first_char_onset_time: 12.0
+channel_start: 12      # MEG channel slice 12:318 (306 ch)
+channel_end: 318
+n_context: 5           # meg_context window
+fmri_start_row: 17     # fMRI grid offset (≈12.07 s)
+delays: [1, 2, 3, 4]
+context_len: 5         # GPT-2 char context window
+gpt_device: cpu        # cuda on a GPU node
+
+# BIDS inputs (relative to paths.data_root)
+meg_fif_pattern: "mydata/derivatives/preprocessed_data/sub-{sub:02d}/MEG/sub-{sub:02d}_task-RDR_run-{story}_meg.fif"
+fmri_nii_pattern: "mydata/derivatives/preprocessed_data/sub-{sub:02d}/MNI/sub-{sub:02d}_task-RDR_run-{story}_bold.nii.gz"
+char_time_pattern: "mydata/derivatives/annotations/time_align/char-level/story_{story}_char_time.mat"
+
+# Output roots (created on demand)
+wordvector_dir: ${paths.processed_root}/wordvectors
+ds_dir: ${paths.processed_root}/downsample
+zstim_dir: ${paths.processed_root}/MEG/zstim
+zresp_dir: ${paths.processed_root}/MEG/zresp
+fmri_zresp_dir: ${paths.processed_root}/zresp/cube
+
+# English tokens to drop per story (legacy `eliminate_data` — dataset quirk)
+eliminate_data: {5: [128,129,273,274,275,276,277,278,1107,1109,1110],
+                 6: [73,74,75,76,691,692,950,951,1078,1079,1091,1092,1096,1097],
+                 9: [345], 12: [319,1281,1282,1329,1330], 17: [66,81,82,190,312],
+                 23: [790,791,792,793], 24: [59,60,61,62], 25: [904,905,906,907],
+                 30: [371,372], 44: [202],
+                 45: [12,94,168,224,277,330,369,436,513,577,636,742,793,1143],
+                 49: [357,358,359,391,392,393],
+                 51: [49,50,51,65,66,68,69,70,79,80,81,129,130,131,267,268,269,444,445,498,499,500],
+                 52: [285,286,287], 53: [358], 57: [527]}

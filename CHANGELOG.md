@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Preprocessing pipeline Phase 1** (`recon/preprocessing/`):
+  - `common.py` — legacy-verbatim numerical kernels (zscore, lanczos,
+    4-delay filtering, dup detection) + provenance (streaming sha256,
+    `*.meta.json` sidecars with input hashes + params + git commit;
+    `sidecar_valid` drives idempotent re-runs)
+  - `semantic.py` — GPT-2 char features (per-token encoding; context
+    rule recovered empirically from the golden wordvectors: growing
+    while `i <= 2*context_len`, then a `context_len` window), lanczos
+    downsample onto the 0.4 s grid, zscore+delay → zstim
+  - `meg.py` — fif → zresp (2.5 Hz resample, channels 12:318, 12 s
+    grid crop) + (T, n_context, C) context chunking
+  - `fmri.py` — MNI nii.gz → cube zresp (row-17 crop, per-voxel zscore)
+  - `recon/cli/preprocess.py` + `configs/preprocess.yaml` — six stages
+    with resume-if-valid sidecar semantics
+  - **Golden equivalence vs legacy `E:/results` artifacts (story 1)**:
+    zstim / MEG zresp / context / fMRI cube are BIT-EXACT; lanczos and
+    GPT-2 features match within float32 kernel noise. 7/7 golden tests
+    pass; 141 tests total.
+- `docs/planning/dataset-onboarding.md`: draft onboarding flow for new
+  datasets (to be validated in practice).
 - Repository bootstrap (Week 00)
 - Industry-standard documentation structure under `docs/`:
   - `docs/README.md` (Diátaxis-based documentation index)
