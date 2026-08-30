@@ -283,7 +283,31 @@ MASTER_PORT=29500            # DDP 握手端口（节点间要互通）
 
 torchrun 会自动注入 RANK/LOCAL_RANK/WORLD_SIZE/MASTER_*，所以**单节点多卡直接 torchrun，只有跨节点才需要这个脚本**。
 
-### 6.3 `scripts/sync_wandb.sh` —— W&B 离线同步（mgmt 上）
+### 6.3 `scripts/run_preprocess.sh` —— 预处理集群分发（mgmt 上）
+
+```bash
+# 全量预处理（12 被试 × 60 story，按 stage 顺序分波，断点续跑）
+bash scripts/run_preprocess.sh
+
+# 只跑某个 stage / 子集
+bash scripts/run_preprocess.sh meg_zresp meg_context
+SUBJECTS="1 2" N_STORIES=10 bash scripts/run_preprocess.sh meg_zresp
+
+# 先看会发什么命令（不实际执行）
+DRY_RUN=1 bash scripts/run_preprocess.sh
+
+# 进度（mgmt 上，扫 sidecar 统计完成率）
+python -m recon.cli.preprocess_run status
+python -m recon.cli.preprocess_run status --stages meg_zresp meg_context
+```
+
+**机制**：任务 = (subject, story 分块)；每 stage 一波，ssh 到各节点起
+worker（每个 worker 是 `python -m recon.cli.preprocess`，**自动跳过
+sidecar 有效的产物**）→ 重跑脚本即续跑，文件系统就是任务队列。
+gpt 特征 stage 只在 GPU 节点跑；其余 stage 是 CPU 活，默认每节点 8 worker。
+每 worker 日志在 `logs/preprocess/<stage>_<node>_wN.log`。
+
+### 6.4 `scripts/sync_wandb.sh` —— W&B 离线同步（mgmt 上）
 
 ```bash
 # mgmt 节点（有网）：wandb login 一次后

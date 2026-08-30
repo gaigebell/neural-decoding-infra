@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     pass; 141 tests total.
 - `docs/planning/dataset-onboarding.md`: draft onboarding flow for new
   datasets (to be validated in practice).
+- **Preprocessing pipeline Phase 2 — cluster runner**:
+  - `scripts/run_preprocess.sh` — mgmt-side dispatcher: stage waves,
+    (subject × story-chunk) slicing, ssh worker dispatch per node,
+    Ctrl-C remote cleanup, `DRY_RUN` preview; each worker invokes the
+    existing hydra CLI which skips valid-sidecar artifacts, so re-runs
+    resume interrupted jobs (filesystem-as-task-queue)
+  - `recon/cli/preprocess_run.py status` — sidecar-coverage progress
+    table per stage (cluster/local paths)
 - Repository bootstrap (Week 00)
 - Industry-standard documentation structure under `docs/`:
   - `docs/README.md` (Diátaxis-based documentation index)
