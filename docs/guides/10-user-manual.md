@@ -307,7 +307,29 @@ sidecar 有效的产物**）→ 重跑脚本即续跑，文件系统就是任务
 gpt 特征 stage 只在 GPU 节点跑；其余 stage 是 CPU 活，默认每节点 8 worker。
 每 worker 日志在 `logs/preprocess/<stage>_<node>_wN.log`。
 
-### 6.4 `scripts/sync_wandb.sh` —— W&B 离线同步（mgmt 上）
+### 6.4 BrainOmni 阶段（集群前置条件）
+
+```bash
+# ① 同步 BrainOmni 代码+权重到集群（configs/paths/cluster.yaml 的
+#    brainomni_repo 指向它，如 /home/test/reconstruction/BrainOmni/）
+# ② 安装依赖（代码不 pip 装，运行时 sys.path 链接到 ① 的文件夹）：
+pip install -e ".[brainomni]"        # einops/einx/vector-quantize-pytorch/torch-complex
+#    deepspeed 不需要（推理有 shim；只有重训 BrainOmni 才需要）
+# ③ 验证：
+python -c "import sys; sys.path.insert(0, '<brainomni_repo>'); \
+from brainomni.model import BrainOmni; print('OK')"
+# ④ 跑（segments 自动进入 CPU 波；encode 在 GPU 节点）
+bash scripts/run_preprocess.sh meg_brainomni_segments brainomni_encode
+```
+
+⚠️ 两点：
+- 完整 story 的 encode 是 4D conv 全量前向，显存需求大——全量编码在
+  集群 PH402 上跑（本地测试用 4 段切片）
+- **输入尺度必须匹配模型训练分布**（tokenize 无内部归一化）：先用
+  [第 7 节] 的 fif 量级检查确认集群数据与黄金（±0.5 量级）一致；
+  若集群 fif 是物理 T（1e-13），需要给 segments 阶段加缩放参数
+
+### 6.5 `scripts/sync_wandb.sh` —— W&B 离线同步（mgmt 上）
 
 ```bash
 # mgmt 节点（有网）：wandb login 一次后

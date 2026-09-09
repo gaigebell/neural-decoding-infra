@@ -14,6 +14,6 @@ Stages (via ``python -m recon.cli.preprocess``):
 - ``fmri_cube``           nii.gz → cube zresp
 """
 
-from . import common, fmri, meg, semantic
+from . import brainomni, common, fmri, meg, semantic
 
-__all__ = ["common", "fmri", "meg", "semantic"]
+__all__ = ["brainomni", "common", "fmri", "meg", "semantic"]

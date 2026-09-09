@@ -15,7 +15,9 @@ defaults:
   - _self_
 
 # Task selection
-stage: null            # gpt_char_features | semantic_downsample | semantic_delay | meg_zresp | meg_context | fmri_cube
+# gpt_char_features | semantic_downsample | semantic_delay | meg_zresp | meg_context |
+# fmri_cube | meg_brainomni_segments | brainomni_encode
+stage: null
 subject: 1
 stories: null          # null = 1..60
 resume: true           # skip artifacts with valid sidecars
@@ -32,6 +34,13 @@ fmri_start_row: 17     # fMRI grid offset (≈12.07 s)
 delays: [1, 2, 3, 4]
 context_len: 5         # GPT-2 char context window
 gpt_device: cpu        # cuda on a GPU node
+
+# BrainOmni stages (segments on CPU, encode on GPU)
+brainomni_sample_rate: 256
+brainomni_segment_length: 2   # seconds of MEG before each word onset
+brainomni_ckpt: base          # ckpt_collection/{base|tiny}/BrainOmni.pt
+tokenizer_ckpt: braintokenizer
+encode_device: cuda           # cuda | cpu
 
 # BIDS inputs (relative to paths.data_root)
 meg_fif_pattern: "mydata/derivatives/preprocessed_data/sub-{sub:02d}/MEG/sub-{sub:02d}_task-RDR_run-{story}_meg.fif"

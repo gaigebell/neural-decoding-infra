@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 # Each extra is named in pyproject.toml. We map it to a primary package
 # used for the availability check (some extras wrap multiple packages).
 _EXTRA_TO_PACKAGE: Final[dict[str, str]] = {
-    "brainomni": "brainomni",
+    # brainomni extra = third-party deps only; the model code itself
+    # comes from paths.brainomni_repo (sys.path injection), so check a dep.
+    "brainomni": "einx",
     "large-lm": "vllm",
     "data-public": "datasets",
     "all": "",  # special: skip check (assumes everything installed)

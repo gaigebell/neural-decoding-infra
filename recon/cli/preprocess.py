@@ -15,7 +15,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from ..preprocessing import fmri, meg, semantic
+from ..preprocessing import brainomni, fmri, meg, semantic
 from ..preprocessing.common import sidecar_valid
 from ..utils.logging import get_logger
 
@@ -155,9 +155,68 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
         fmri.process_story(nii, ds, Path(cfg.fmri_zresp_dir), sub_id, story, layer, start_row=int(cfg.fmri_start_row))
         return
 
+    if stage == "meg_brainomni_segments":
+        fif = Path(paths.data_root) / cfg.meg_fif_pattern.format(sub=sub_id, story=story)
+        time_align = Path(cfg.ds_dir) / f"time_{story}_{layer}.npy"
+        out_dir = Path(cfg.zresp_dir)
+        artifact = (
+            out_dir / f"brainomni_sample_rate_{cfg.brainomni_sample_rate}_segment_length_{cfg.brainomni_segment_length}"
+            / f"brainomni_zresp{sub_id}_{story}.pt"
+        )
+        params = {
+            "stage": stage, "subject_id": sub_id, "story_id": story, "layer": layer,
+            "sample_rate": int(cfg.brainomni_sample_rate),
+            "segment_length": int(cfg.brainomni_segment_length),
+        }
+        if cfg.resume and sidecar_valid(artifact, {"fif": fif, "time_align": time_align}, params):
+            logger.info("skip (sidecar valid): %s", artifact)
+            return
+        brainomni.extract_segments_story(
+            fif, time_align, out_dir, sub_id, story, layer,
+            sample_rate=int(cfg.brainomni_sample_rate),
+            segment_length=int(cfg.brainomni_segment_length),
+        )
+        return
+
+    if stage == "brainomni_encode":
+        segments = (
+            Path(cfg.zresp_dir) / f"brainomni_sample_rate_{cfg.brainomni_sample_rate}_segment_length_{cfg.brainomni_segment_length}"
+            / f"brainomni_zresp{sub_id}_{story}.pt"
+        )
+        artifact = (
+            Path(cfg.zresp_dir) / f"brainomni_sample_rate_{cfg.brainomni_sample_rate}_segment_length_{cfg.brainomni_segment_length}"
+            / f"brainomni_zresp{sub_id}_{story}_features.pt"
+        )
+        params = {
+            "stage": stage, "subject_id": sub_id, "story_id": story,
+            "brainomni_repo": paths.brainomni_repo,
+            "brainomni_ckpt": cfg.brainomni_ckpt,
+            "tokenizer_ckpt": cfg.tokenizer_ckpt,
+            "device": cfg.encode_device,
+        }
+        ckpt_path = Path(paths.brainomni_repo) / "ckpt_collection" / cfg.brainomni_ckpt
+        tok_path = Path(paths.brainomni_repo) / "ckpt_collection" / cfg.tokenizer_ckpt
+        if cfg.resume and sidecar_valid(
+            artifact, {"segments": segments, "brainomni_ckpt": ckpt_path / "BrainOmni.pt"}, params
+        ):
+            logger.info("skip (sidecar valid): %s", artifact)
+            return
+        brainomni.encode_story(
+            segments,
+            segments.parent,
+            sub_id,
+            story,
+            brainomni_repo=paths.brainomni_repo,
+            brainomni_ckpt=ckpt_path,
+            tokenizer_ckpt=tok_path,
+            device=cfg.encode_device,
+        )
+        return
+
     raise ValueError(
         f"Unknown stage: {stage} (expected gpt_char_features | semantic_downsample | "
-        "semantic_delay | meg_zresp | meg_context | fmri_cube)"
+        "semantic_delay | meg_zresp | meg_context | fmri_cube | "
+        "meg_brainomni_segments | brainomni_encode)"
     )
 
 

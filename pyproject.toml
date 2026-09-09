@@ -51,12 +51,22 @@ dependencies = [
 # docs/standards/07-dependencies.md.
 [project.optional-dependencies]
 # ─────────────── Single integrations ───────────────
-# BrainOmni: pretraining-based universal brain encoder.
-# Update git URL to actual BrainOmni repo when available.
+# BrainOmni: pretraining-based universal brain encoder (NeurIPS 2025).
+#
+# The BrainOmni CODE is NOT pip-installed: the repo checkout lives at
+# `paths.brainomni_repo` (local: D:/.../BrainOmni-main; cluster:
+# /home/test/reconstruction/BrainOmni-main) and is imported at runtime
+# via sys.path (recon/preprocessing/brainomni.py). This extra installs
+# only the third-party dependencies its import chain needs:
+#   einops, einx, vector-quantize-pytorch, torch-complex
+# deepspeed is training-only (imported by their trainer.py); the
+# inference path ships a no-op shim when it is absent, so do NOT
+# install it unless you retrain BrainOmni itself.
 brainomni = [
-    "brainomni @ git+https://github.com/your-org/brainomni.git@main",
-    "transformers>=4.30",
-    "accelerate>=0.20",
+    "einops>=0.8",
+    "einx>=0.3",
+    "vector-quantize-pytorch>=1.22",
+    "torch-complex>=0.4",
 ]
 
 # Large language model decoding (vLLM + FlashAttention).

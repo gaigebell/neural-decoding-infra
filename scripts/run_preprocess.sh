@@ -38,8 +38,9 @@ N_STORIES=${N_STORIES:-60}
 CHUNK=${CHUNK:-5}                # stories per worker invocation
 DRY_RUN=${DRY_RUN:-0}
 
-# Default stage order respects dependencies (ds before delay/zresp).
-DEFAULT_STAGES=(gpt_char_features semantic_downsample semantic_delay meg_zresp meg_context)
+# Default stage order respects dependencies (ds before delay/zresp;
+# brainomni segments before encode).
+DEFAULT_STAGES=(gpt_char_features semantic_downsample semantic_delay meg_zresp meg_context meg_brainomni_segments brainomni_encode)
 STAGES=("${@}")                   # positional args override
 if [[ ${#STAGES[@]} -eq 0 ]]; then STAGES=("${DEFAULT_STAGES[@]}"); fi
 
@@ -77,11 +78,15 @@ trap cleanup_remote INT TERM
 for STAGE in "${STAGES[@]}"; do
     echo "=== Stage ${STAGE} ==="
     case "${STAGE}" in
-        gpt_char_features|semantic_downsample)
-            SUBJ_INDEP=1; W=$((GPU_WORKERS)); NODELIST=("${GPU_NODE}") ;;
-        *)
+        gpt_char_features|semantic_downsample|brainomni_encode)
+            SUBJ_INDEP=0; W=$((GPU_WORKERS)); NODELIST=("${GPU_NODE}") ;;
+        meg_brainomni_segments|*)
             SUBJ_INDEP=0; W=$(( ${#NODES[@]} * WORKERS_PER_NODE )); NODELIST=("${NODES[@]}") ;;
     esac
+    # gpt/downsample artifacts are per-story only (subject-independent)
+    if [[ "${STAGE}" == "gpt_char_features" || "${STAGE}" == "semantic_downsample" ]]; then
+        SUBJ_INDEP=1
+    fi
 
     if [[ ${SUBJ_INDEP} -eq 1 ]]; then
         mapfile -t CHUNKS < <(emit_chunks subject-independent)

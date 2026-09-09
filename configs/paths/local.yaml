@@ -7,4 +7,5 @@ results_dir: ./tests/tmp_results
 pretrained_root: ./tests/fake_pretrained
 
 gpt_path: D:/allforwork/Liu_Lab/_Reconstruction/gpt2-chinese-cluecorpussmall
-brainomni_path: ${paths.pretrained_root}/fake_brainomni
+brainomni_repo: D:/allforwork/Liu_Lab/_Reconstruction/BrainOmni-main
+brainomni_path: ${paths.brainomni_repo}/ckpt_collection

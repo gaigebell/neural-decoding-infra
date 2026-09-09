@@ -31,6 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     pass; 141 tests total.
 - `docs/planning/dataset-onboarding.md`: draft onboarding flow for new
   datasets (to be validated in practice).
+- **BrainOmni stages** (`recon/preprocessing/brainomni.py`):
+  - `meg_brainomni_segments` — ports the NEW legacy `brainomni_process`
+    (fif → pick MEG → notch 60Hz → bandpass 0.1-96Hz → 256Hz → per-char
+    segments (2s before onset, zero-padded) → sensor-type-wise
+    normalization → `{x, pos, sensor_type}` .pt + word-time meta).
+    Segments stored float32 (the legacy new variant's float64 breaks the
+    model — the old variant used float32).
+  - `brainomni_encode` — ports `brainomni_encode.py:infer_story`: loads
+    BrainOmni from the owner's local repo (sys.path injection, frozen
+    tokenizer), `model.encode` on GPU, saves (B, n_neurons, seq, dim)
+    features. Includes an inference-only deepspeed no-op shim for
+    platforms without deepspeed (Windows local dev; cluster installs it).
+  - CLI stages + config (sample_rate/segment_length/ckpt variants/
+    encode_device) + dispatcher waves (segments on CPU nodes, encode on
+    GPU node). Verified locally: 4/4 unit tests, segments on story 1,
+    tiny-ckpt GPU encode (4-segment slice; full-story encode needs the
+    cluster's big-memory GPUs).
 - **Preprocessing pipeline Phase 2 — cluster runner**:
   - `scripts/run_preprocess.sh` — mgmt-side dispatcher: stage waves,
     (subject × story-chunk) slicing, ssh worker dispatch per node,

@@ -8,4 +8,5 @@ pretrained_root: /home/test/reconstruction/pretrained
 
 # Specific paths
 gpt_path: ${paths.pretrained_root}/gpt2-chinese-cluecorpussmall
-brainomni_path: ${paths.pretrained_root}/brainomni
+brainomni_repo: /home/test/reconstruction/BrainOmni   # 需同步到集群
+brainomni_path: ${paths.brainomni_repo}/ckpt_collection
