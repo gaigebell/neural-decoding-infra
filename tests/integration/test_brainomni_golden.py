@@ -62,6 +62,7 @@ class TestBrainOmniSegments:
         out = brainomni.extract_segments_story(
             FIF, TIME_ALIGN, tmp_path, subject_id=1, story_id=1,
             sample_rate=256, segment_length=4,
+            x_scale=9.508e9,  # empirically recovered golden scale factor
         )
         import torch
 
@@ -70,9 +71,13 @@ class TestBrainOmniSegments:
         assert mine["x"].shape == golden["x"].shape
         assert torch.equal(mine["pos"], golden["pos"])  # bit-exact
         assert torch.equal(mine["sensor_type"], golden["sensor_type"])  # bit-exact
-        # x: same shape, real signal (not zeros), NaN-free
+        # x: same scale (range matches), corr ≈ 1; residual is filter noise
+        # from MNE version differences (~2% of signal).
         assert not np.isnan(mine["x"].numpy()).any()
         assert float(mine["x"].abs().max()) > 0
+        xm, xg = mine["x"].numpy().ravel(), golden["x"].numpy().ravel()
+        assert np.corrcoef(xm, xg)[0, 1] > 0.999
+        assert abs(float(mine["x"].max()) - float(golden["x"].max())) < 0.05
 
 
 @pytest.mark.skipif(

@@ -167,6 +167,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
             "stage": stage, "subject_id": sub_id, "story_id": story, "layer": layer,
             "sample_rate": int(cfg.brainomni_sample_rate),
             "segment_length": int(cfg.brainomni_segment_length),
+            "x_scale": float(cfg.brainomni_x_scale),
         }
         if cfg.resume and sidecar_valid(artifact, {"fif": fif, "time_align": time_align}, params):
             logger.info("skip (sidecar valid): %s", artifact)
@@ -175,6 +176,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
             fif, time_align, out_dir, sub_id, story, layer,
             sample_rate=int(cfg.brainomni_sample_rate),
             segment_length=int(cfg.brainomni_segment_length),
+            x_scale=float(cfg.brainomni_x_scale),
         )
         return
 

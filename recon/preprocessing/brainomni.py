@@ -107,6 +107,7 @@ def extract_segments_story(
     layer: int = 10,
     sample_rate: int = 256,
     segment_length: int = 2,
+    x_scale: float = 1.0,
 ) -> Path:
     """fif → BrainOmni input segments for one story (legacy ``brainomni_process``).
 
@@ -183,6 +184,14 @@ def extract_segments_story(
     # model (conv bias is float32); the legacy OLD variant used float32 —
     # we follow it: float32 halves storage and matches the model weights.
     x = np.array(chunked_resp, dtype=np.float32)  # (T, C, sr*seg)
+    if x_scale != 1.0:
+        # Scale to the model's input convention. Empirical finding
+        # (2026-09-11): the golden artifacts are our calibrated-T
+        # segments scaled by a constant ~9.508e9 (per-segment factors
+        # consistent to 0.02%, corr 0.9998) — the golden fif copy was
+        # stored in different units. BrainOmni was trained on that
+        # scale; set x_scale to match it when the local fif is in T.
+        x = (x * x_scale).astype(np.float32)
     data_dict = {
         "x": torch.tensor(x),
         "pos": torch.tensor(np.array(chunked_pos)),  # (T, C, 6)
@@ -209,6 +218,7 @@ def extract_segments_story(
             "layer": layer,
             "sample_rate": sample_rate,
             "segment_length": segment_length,
+            "x_scale": x_scale,
         },
     )
     logger.info("BrainOmni segments story %d: x=%s", story_id, tuple(x.shape))

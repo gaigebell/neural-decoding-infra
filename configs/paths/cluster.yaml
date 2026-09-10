@@ -4,7 +4,7 @@
 data_root: /home/test/reconstruction             # raw BIDS data (mydata/)
 processed_root: /home/test/reconstruction/results  # preprocessed INPUT data (never written by training)
 results_dir: /home/test/reconstruction/outputs   # training OUTPUTS (ckpt, metadata — separate from input data)
-pretrained_root: /home/test/reconstruction/pretrained
+pretrained_root: /home/test/reconstruction/llm
 
 # Specific paths
 gpt_path: ${paths.pretrained_root}/gpt2-chinese-cluecorpussmall
