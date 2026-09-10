@@ -10,3 +10,8 @@ pretrained_root: /home/test/reconstruction/pretrained
 gpt_path: ${paths.pretrained_root}/gpt2-chinese-cluecorpussmall
 brainomni_repo: /home/test/reconstruction/BrainOmni   # 需同步到集群
 brainomni_path: ${paths.brainomni_repo}/ckpt_collection
+
+# BIDS input patterns (relative to data_root; cluster has NO mydata/derivatives prefix)
+meg_fif_pattern: "preprocessed_data/sub-{sub:02d}/MEG/sub-{sub:02d}_task-RDR_run-{story}_meg.fif"
+fmri_nii_pattern: "preprocessed_data/sub-{sub:02d}/MNI/sub-{sub:02d}_task-RDR_run-{story}_bold.nii.gz"
+char_time_pattern: "derivatives/annotations/time_align/char-level/story_{story}_char_time.mat"  # 待确认集群实际路径

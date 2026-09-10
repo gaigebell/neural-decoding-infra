@@ -42,14 +42,15 @@ brainomni_ckpt: base          # ckpt_collection/{base|tiny}/BrainOmni.pt
 tokenizer_ckpt: braintokenizer
 encode_device: cuda           # cuda | cpu
 
-# BIDS inputs (relative to paths.data_root)
-meg_fif_pattern: "mydata/derivatives/preprocessed_data/sub-{sub:02d}/MEG/sub-{sub:02d}_task-RDR_run-{story}_meg.fif"
-fmri_nii_pattern: "mydata/derivatives/preprocessed_data/sub-{sub:02d}/MNI/sub-{sub:02d}_task-RDR_run-{story}_bold.nii.gz"
-char_time_pattern: "mydata/derivatives/annotations/time_align/char-level/story_{story}_char_time.mat"
+# BIDS inputs (environment-specific layout; defined in paths/{env}.yaml)
+meg_fif_pattern: ${paths.meg_fif_pattern}
+fmri_nii_pattern: ${paths.fmri_nii_pattern}
+char_time_pattern: ${paths.char_time_pattern}
 
 # Output roots (created on demand)
 wordvector_dir: ${paths.processed_root}/wordvectors
-ds_dir: ${paths.processed_root}/downsample
+meg_ds_dir: ${paths.processed_root}/MEG/downsample   # semantic ds + time_align (MEG grid)
+fmri_ds_dir: ${paths.processed_root}/downsample     # semantic ds (fMRI grid)
 zstim_dir: ${paths.processed_root}/MEG/zstim
 zresp_dir: ${paths.processed_root}/MEG/zresp
 fmri_zresp_dir: ${paths.processed_root}/zresp/cube

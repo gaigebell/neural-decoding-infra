@@ -80,7 +80,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
     if stage == "semantic_downsample":
         wv = Path(cfg.wordvector_dir) / f"story{story}_{layer}.npy"
         mat = Path(paths.data_root) / cfg.char_time_pattern.format(sub=sub_id, story=story)
-        artifact = Path(cfg.ds_dir) / f"ds_{story}_{layer}.npy"
+        artifact = Path(cfg.meg_ds_dir) / f"ds_{story}_{layer}.npy"
         params = {
             "stage": stage, "story_id": story, "layer": layer,
             "first_char_onset_time": float(cfg.first_char_onset_time),
@@ -90,7 +90,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
             logger.info("skip (sidecar valid): %s", artifact)
             return
         semantic.downsample_story(
-            wv, mat, Path(cfg.ds_dir), story, layer,
+            wv, mat, Path(cfg.meg_ds_dir), story, layer,
             first_char_onset_time=float(cfg.first_char_onset_time),
             interval=float(cfg.interval),
             eliminate=_eliminate(cfg, story),
@@ -98,7 +98,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
         return
 
     if stage == "semantic_delay":
-        ds = Path(cfg.ds_dir) / f"ds_{story}_{layer}.npy"
+        ds = Path(cfg.meg_ds_dir) / f"ds_{story}_{layer}.npy"
         artifact = Path(cfg.zstim_dir) / f"sub{sub_id}_zstim_{layer}_story{story}.npy"
         params = {
             "stage": stage, "subject_id": sub_id, "story_id": story, "layer": layer,
@@ -112,7 +112,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
 
     if stage == "meg_zresp":
         fif = Path(paths.data_root) / cfg.meg_fif_pattern.format(sub=sub_id, story=story)
-        ds = Path(cfg.ds_dir) / f"ds_{story}_{layer}.npy"
+        ds = Path(cfg.meg_ds_dir) / f"ds_{story}_{layer}.npy"
         artifact = Path(cfg.zresp_dir) / f"zresp{sub_id}_{story}.npy"
         params = {
             "stage": stage, "subject_id": sub_id, "story_id": story, "layer": layer,
@@ -143,7 +143,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
 
     if stage == "fmri_cube":
         nii = Path(paths.data_root) / cfg.fmri_nii_pattern.format(sub=sub_id, story=story)
-        ds = Path(cfg.ds_dir) / f"ds_{story}_{layer}.npy"
+        ds = Path(cfg.fmri_ds_dir) / f"ds_{story}_{layer}.npy"
         artifact = Path(cfg.fmri_zresp_dir) / f"zresp{sub_id}_{story}.npy"
         params = {
             "stage": stage, "subject_id": sub_id, "story_id": story, "layer": layer,
@@ -157,7 +157,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
 
     if stage == "meg_brainomni_segments":
         fif = Path(paths.data_root) / cfg.meg_fif_pattern.format(sub=sub_id, story=story)
-        time_align = Path(cfg.ds_dir) / f"time_{story}_{layer}.npy"
+        time_align = Path(cfg.meg_ds_dir) / f"time_{story}_{layer}.npy"
         out_dir = Path(cfg.zresp_dir)
         artifact = (
             out_dir / f"brainomni_sample_rate_{cfg.brainomni_sample_rate}_segment_length_{cfg.brainomni_segment_length}"

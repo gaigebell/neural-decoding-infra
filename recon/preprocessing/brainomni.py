@@ -254,12 +254,26 @@ def _ensure_deepspeed_shim() -> None:
     sys.modules["deepspeed.comm"] = comm
 
 
-def _load_model(ckpt_dir: str | Path, cls_name: str):
-    """Load a BrainOmni/BrainTokenizer model from a ckpt dir (legacy loader)."""
+def _ensure_brainomni_on_path(repo: str | Path) -> None:
+    """Put the BrainOmni checkout on sys.path (idempotent)."""
+    repo = str(Path(repo))
+    if repo not in sys.path:
+        sys.path.insert(0, repo)
+
+
+def _load_model(ckpt_dir: str | Path, cls_name: str, repo: str | Path | None = None):
+    """Load a BrainOmni/BrainTokenizer model from a ckpt dir (legacy loader).
+
+    ``repo`` (the BrainOmni checkout) is added to ``sys.path`` so the
+    ``brainomni``/``braintokenizer``/``model_utils`` packages resolve —
+    pass it when calling this directly; ``encode_story`` passes it.
+    """
     import torch
 
     ckpt_dir = Path(ckpt_dir)
     model_config = json.loads((ckpt_dir / "model_cfg.json").read_text())
+    if repo is not None:
+        _ensure_brainomni_on_path(repo)
     _ensure_deepspeed_shim()
     if cls_name == "BrainTokenizer":
         from braintokenizer.model import BrainTokenizer
@@ -292,13 +306,12 @@ def encode_story(
 
     # The BrainOmni package lives outside this repo — add it to sys.path.
     repo = Path(brainomni_repo)
-    if str(repo) not in sys.path:
-        sys.path.insert(0, str(repo))
+    _ensure_brainomni_on_path(repo)
     if device.startswith("cuda") and not torch.cuda.is_available():
         logger.warning("CUDA not available — falling back to CPU")
         device = "cpu"
 
-    model = _load_model(brainomni_ckpt, "BrainOmni")
+    model = _load_model(brainomni_ckpt, "BrainOmni", repo=repo)
     for p in model.tokenizer.parameters():
         p.requires_grad = False
     model.to(device)

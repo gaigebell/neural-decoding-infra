@@ -9,3 +9,8 @@ pretrained_root: ./tests/fake_pretrained
 gpt_path: D:/allforwork/Liu_Lab/_Reconstruction/gpt2-chinese-cluecorpussmall
 brainomni_repo: D:/allforwork/Liu_Lab/_Reconstruction/BrainOmni-main
 brainomni_path: ${paths.brainomni_repo}/ckpt_collection
+
+# BIDS input patterns (relative to data_root)
+meg_fif_pattern: "mydata/derivatives/preprocessed_data/sub-{sub:02d}/MEG/sub-{sub:02d}_task-RDR_run-{story}_meg.fif"
+fmri_nii_pattern: "mydata/derivatives/preprocessed_data/sub-{sub:02d}/MNI/sub-{sub:02d}_task-RDR_run-{story}_bold.nii.gz"
+char_time_pattern: "mydata/derivatives/annotations/time_align/char-level/story_{story}_char_time.mat"
