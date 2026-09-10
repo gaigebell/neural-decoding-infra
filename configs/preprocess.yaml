@@ -38,11 +38,11 @@ gpt_device: cpu        # cuda on a GPU node
 # BrainOmni stages (segments on CPU, encode on GPU)
 brainomni_sample_rate: 256
 brainomni_segment_length: 2   # seconds of MEG before each word onset
-brainomni_x_scale: 1.0        # x amplitude scale. The golden artifacts are the
-                              # calibrated-T segments × ~9.508e9 (empirically
-                              # recovered, 2026-09-11); set 9.508e9 to reproduce
-                              # the golden/model training scale when the input
-                              # fif stores physical T.
+brainomni_x_scale: 9.508e9    # x amplitude scale. The golden artifacts (and thus
+                              # the BrainOmni training distribution) are the
+                              # calibrated-T segments × 9.508e9 (empirically
+                              # recovered, 2026-09-11; corr 0.9998 vs golden).
+                              # Set 1.0 for raw physical-T segments.
 brainomni_ckpt: base          # ckpt_collection/{base|tiny}/BrainOmni.pt
 tokenizer_ckpt: braintokenizer
 encode_device: cuda           # cuda | cpu
