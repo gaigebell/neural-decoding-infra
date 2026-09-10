@@ -21,7 +21,7 @@
 set -euo pipefail
 
 # ───────────────────── Config ─────────────────────
-NODES=(cn3 gn14 gn15 gn16)
+NODES=(gn11 gn12 cn3 gn14 gn15 gn16)
 GPUS_PER_NODE=2
 MASTER_PORT="${MASTER_PORT:-29500}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

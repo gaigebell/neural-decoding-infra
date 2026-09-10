@@ -2,7 +2,7 @@
 # This is the default config used on the HPC cluster.
 
 data_root: /home/test/reconstruction             # raw BIDS data (mydata/)
-processed_root: /home/test/reconstruction/results  # preprocessed INPUT data (never written by training)
+processed_root: /home/test/reconstruction/results_v2  # 新管线产物（训练输入）；旧 results/ 保留作参考
 results_dir: /home/test/reconstruction/outputs   # training OUTPUTS (ckpt, metadata — separate from input data)
 pretrained_root: /home/test/reconstruction/llm
 

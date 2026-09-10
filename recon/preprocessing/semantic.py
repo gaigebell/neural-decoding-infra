@@ -145,6 +145,45 @@ def extract_gpt_char_features(
     return written
 
 
+def time_align_story(
+    mat_path: str | Path,
+    save_dir: str | Path,
+    story_id: int,
+    layer: int,
+    eliminate: list[int] | None = None,
+) -> Path:
+    """Port of legacy ``accurate_sample``: word onset times for one story.
+
+    Reads the BIDS char-time ``.mat`` (``end`` times), applies the
+    English-elimination list, and nudges duplicate consecutive onsets
+    apart by 0.01 s. Output ``time_{story}_{layer}.npy`` — the input the
+    brain-side stages (meg_brainomni_segments) align to.
+    """
+    mat_path = Path(mat_path)
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    time_data = loadmat(str(mat_path))
+    onset = np.squeeze(time_data["end"])
+    if eliminate:
+        onset = np.delete(onset, eliminate, axis=0)
+    for i in range(1, len(onset)):
+        if onset[i] == onset[i - 1]:
+            onset[i] += 0.01  # legacy: separate identical consecutive onsets
+
+    out = save_dir / f"time_{story_id}_{layer}.npy"
+    params = {
+        "stage": "time_align",
+        "story_id": story_id,
+        "layer": layer,
+        "eliminate": eliminate,
+    }
+    np.save(out, onset)
+    write_sidecar(out, {"mat": mat_path}, params)
+    logger.info("Time align story %d: %d onsets -> %s", story_id, len(onset), out)
+    return out
+
+
 def downsample_story(
     wordvector_path: str | Path,
     mat_path: str | Path,
@@ -241,4 +280,5 @@ __all__ = [
     "downsample_story",
     "extract_gpt_char_features",
     "needs_regeneration",
+    "time_align_story",
 ]

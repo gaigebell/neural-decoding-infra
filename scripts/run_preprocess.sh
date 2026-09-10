@@ -29,7 +29,7 @@ LOG_DIR="${REPO_ROOT}/logs/preprocess"
 mkdir -p "${LOG_DIR}"
 
 # ───────────────────── Config ─────────────────────
-NODES=(${NODES:-cn3 gn14 gn15 gn16})
+NODES=(${NODES:-gn11 gn12 cn3 gn14 gn15 gn16})
 WORKERS_PER_NODE=${WORKERS_PER_NODE:-8}
 GPU_NODE=${GPU_NODE:-cn3}
 GPU_WORKERS=${GPU_WORKERS:-1}
@@ -39,8 +39,8 @@ CHUNK=${CHUNK:-5}                # stories per worker invocation
 DRY_RUN=${DRY_RUN:-0}
 
 # Default stage order respects dependencies (ds before delay/zresp;
-# brainomni segments before encode).
-DEFAULT_STAGES=(gpt_char_features semantic_downsample semantic_delay meg_zresp meg_context meg_brainomni_segments brainomni_encode)
+# time_align before brainomni segments; segments before encode).
+DEFAULT_STAGES=(gpt_char_features time_align semantic_downsample semantic_delay meg_zresp meg_context meg_brainomni_segments brainomni_encode)
 STAGES=("${@}")                   # positional args override
 if [[ ${#STAGES[@]} -eq 0 ]]; then STAGES=("${DEFAULT_STAGES[@]}"); fi
 
