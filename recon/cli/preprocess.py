@@ -195,6 +195,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
             "brainomni_ckpt": cfg.brainomni_ckpt,
             "tokenizer_ckpt": cfg.tokenizer_ckpt,
             "device": cfg.encode_device,
+            "chunk": int(cfg.encode_chunk),
         }
         ckpt_path = Path(paths.brainomni_repo) / "ckpt_collection" / cfg.brainomni_ckpt
         tok_path = Path(paths.brainomni_repo) / "ckpt_collection" / cfg.tokenizer_ckpt
@@ -212,6 +213,7 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
             brainomni_ckpt=ckpt_path,
             tokenizer_ckpt=tok_path,
             device=cfg.encode_device,
+            chunk=int(cfg.encode_chunk),
         )
         return
 

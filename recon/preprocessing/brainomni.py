@@ -306,8 +306,17 @@ def encode_story(
     brainomni_ckpt: str | Path,
     tokenizer_ckpt: str | Path,
     device: str = "cuda",
+    chunk: int = 64,
 ) -> Path:
-    """BrainOmni-encode one story's segments → ``_features.pt`` (GPU)."""
+    """BrainOmni-encode one story's segments → ``_features.pt`` (GPU).
+
+    ``chunk`` splits the segments into batches. With the released
+    checkpoints (window_length=512, overlap_ratio=0.25) every segment is
+    ONE unfold window — tokenization is per-segment, so chunking is
+    numerically identical and keeps peak memory bounded (a full story
+    of 1586 segments × 306 ch × 512 samples exceeds PH402/4060 memory
+    in one forward pass: CUDA "invalid configuration argument").
+    """
     import torch
 
     segments_path = Path(segments_path)
@@ -328,10 +337,17 @@ def encode_story(
     model.eval()
 
     data = torch.load(segments_path, map_location="cpu", weights_only=False)
+    n_segments = data["x"].shape[0]
+    features_parts = []
     with torch.no_grad():
-        inputs = {k: v.to(device) for k, v in data.items()}
-        outputs = model.encode(**inputs)
-        features = outputs.cpu()
+        for start in range(0, n_segments, chunk):
+            inputs = {k: v[start : start + chunk].to(device) for k, v in data.items()}
+            outputs = model.encode(**inputs)
+            features_parts.append(outputs.cpu())
+            logger.info(
+                "  encoded segments %d-%d/%d", start, min(start + chunk, n_segments), n_segments
+            )
+    features = torch.cat(features_parts, dim=0)
     out = save_dir / f"brainomni_zresp{subject_id}_{story_id}_features.pt"
     torch.save(features, out)
     write_sidecar(
@@ -345,6 +361,7 @@ def encode_story(
             "brainomni_ckpt": str(brainomni_ckpt),
             "tokenizer_ckpt": str(tokenizer_ckpt),
             "device": device,
+            "chunk": chunk,
         },
     )
     logger.info("BrainOmni features story %d: %s", story_id, tuple(features.shape))

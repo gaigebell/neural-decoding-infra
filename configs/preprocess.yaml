@@ -46,6 +46,9 @@ brainomni_x_scale: 1.0        # x amplitude scale. The golden artifacts are the
 brainomni_ckpt: base          # ckpt_collection/{base|tiny}/BrainOmni.pt
 tokenizer_ckpt: braintokenizer
 encode_device: cuda           # cuda | cpu
+encode_chunk: 64              # segments per forward pass (window=whole segment,
+                              # so chunking is numerically identical; keeps peak
+                              # memory bounded on PH402/4060)
 
 # BIDS inputs (environment-specific layout; defined in paths/{env}.yaml)
 meg_fif_pattern: ${paths.meg_fif_pattern}
