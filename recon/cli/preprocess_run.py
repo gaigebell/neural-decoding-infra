@@ -24,24 +24,34 @@ def _artifact_patterns(cfg, stage: str) -> dict[str, list[str]]:
     layer = cfg.layer
     return {
         "gpt_char_features": [f"wordvectors/story{{story}}_{L}.npy" for L in cfg.layers],
-        "semantic_downsample": [f"downsample/ds_{{story}}_{layer}.npy"],
+        "time_align": [f"MEG/downsample/time_{{story}}_{layer}.npy"],
+        "semantic_downsample": [f"MEG/downsample/ds_{{story}}_{layer}.npy"],
         "semantic_delay": [f"MEG/zstim/sub{{sub}}_zstim_{layer}_story{{story}}.npy"],
         "meg_zresp": [f"MEG/zresp/zresp{{sub}}_{{story}}.npy"],
         "meg_context": [f"MEG/zresp/zresp{{sub}}_{{story}}_context_{cfg.n_context}.npy"],
+        "meg_brainomni_segments": [
+            f"MEG/zresp/brainomni_sample_rate_{cfg.brainomni_sample_rate}_segment_length_{cfg.brainomni_segment_length}/brainomni_zresp{{sub}}_{{story}}.pt"
+        ],
+        "brainomni_encode": [
+            f"MEG/zresp/brainomni_sample_rate_{cfg.brainomni_sample_rate}_segment_length_{cfg.brainomni_segment_length}/brainomni_zresp{{sub}}_{{story}}_features.pt"
+        ],
         "fmri_cube": [f"zresp/cube/zresp{{sub}}_{{story}}.npy"],
     }[stage]
 
 
 # Stages whose artifacts are per-story only (all subjects share the same
 # story stimuli/time-alignment).
-_SUBJECT_INDEPENDENT_STAGES = {"gpt_char_features", "semantic_downsample"}
+_SUBJECT_INDEPENDENT_STAGES = {"gpt_char_features", "time_align", "semantic_downsample"}
 
 _ALL_STAGES = [
     "gpt_char_features",
+    "time_align",
     "semantic_downsample",
     "semantic_delay",
     "meg_zresp",
     "meg_context",
+    "meg_brainomni_segments",
+    "brainomni_encode",
     "fmri_cube",
 ]
 

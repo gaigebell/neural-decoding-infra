@@ -92,6 +92,16 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
         )
         return
 
+    if stage == "time_align":
+        mat = Path(paths.data_root) / cfg.char_time_pattern.format(sub=sub_id, story=story)
+        artifact = Path(cfg.meg_ds_dir) / f"time_{story}_{layer}.npy"
+        params = {"stage": stage, "story_id": story, "layer": layer, "eliminate": _eliminate(cfg, story)}
+        if cfg.resume and sidecar_valid(artifact, {"mat": mat}, params):
+            logger.info("skip (sidecar valid): %s", artifact)
+            return
+        semantic.time_align_story(mat, Path(cfg.meg_ds_dir), story, layer, eliminate=_eliminate(cfg, story))
+        return
+
     if stage == "semantic_downsample":
         wv = Path(cfg.wordvector_dir) / f"story{story}_{layer}.npy"
         mat = Path(paths.data_root) / cfg.char_time_pattern.format(sub=sub_id, story=story)
@@ -233,8 +243,8 @@ def _run_stage(cfg: DictConfig, sub_id: int, story: int) -> None:
         return
 
     raise ValueError(
-        f"Unknown stage: {stage} (expected gpt_char_features | semantic_downsample | "
-        "semantic_delay | meg_zresp | meg_context | fmri_cube | "
+        f"Unknown stage: {stage} (expected gpt_char_features | time_align | "
+        "semantic_downsample | semantic_delay | meg_zresp | meg_context | fmri_cube | "
         "meg_brainomni_segments | brainomni_encode)"
     )
 

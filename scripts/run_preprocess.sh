@@ -83,8 +83,8 @@ for STAGE in "${STAGES[@]}"; do
         meg_brainomni_segments|*)
             SUBJ_INDEP=0; W=$(( ${#NODES[@]} * WORKERS_PER_NODE )); NODELIST=("${NODES[@]}") ;;
     esac
-    # gpt/downsample artifacts are per-story only (subject-independent)
-    if [[ "${STAGE}" == "gpt_char_features" || "${STAGE}" == "semantic_downsample" ]]; then
+    # gpt/time_align/downsample artifacts are per-story only (subject-independent)
+    if [[ "${STAGE}" == "gpt_char_features" || "${STAGE}" == "time_align" || "${STAGE}" == "semantic_downsample" ]]; then
         SUBJ_INDEP=1
     fi
 
