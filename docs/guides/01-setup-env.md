@@ -1,151 +1,68 @@
 # Guide 01: Set up dev / cluster environment
 
 > **Audience**: Anyone setting up to work on this project.
+> **Status**: 2026-09-12 更新——本地与集群都已实测（torch 2.6.0 两地对齐、
+> 本地 GPU 可用、集群 cu124 验证）。
 
 ---
 
-## Overview
+## 两套环境（都已验证）
 
-This project has **two environments**:
+| | 开发机（本地，Windows） | 集群（6 节点） |
+|---|---|---|
+| GPU | RTX 4060 Laptop（单卡） | 12 × PH402（Pascal，无 fp16 硬件） |
+| torch | **2.6.0+cu124** | **2.6.0+cu124**（CentOS 7 实测可用，cu118 顾虑不成立） |
+| conda env | `ndinf`（py3.10） | `ndinf`（每节点同款） |
+| 用途 | 开发、单卡验证、解码、GPT 特征提取 | 训练、DDP、全量预处理 |
 
-1. **Dev machine** (any team member's laptop) — for writing code only
-2. **Cluster** (4-node GPU cluster) — for running experiments
+本地可以跑 GPU（4060 单卡：训练 smoke、bf16 AMP、解码、GPT-2 特征提取）；
+集群负责多卡/多节点与全量数据。
 
-We deliberately do **not** run GPU code on dev machines. See [ADR-0005](../decisions/0005-no-local-gpu-test.md).
-
-## Dev machine setup
-
-### Prerequisites
-
-- Python ≥ 3.10
-- Git
-- One of: macOS, Linux, Windows (with WSL recommended)
-
-### Steps
+## 本地（Windows）安装
 
 ```bash
-# 1. Clone the repo
-git clone git@github.com:<owner>/neural-decoding-infra.git
-cd neural-decoding-infra
+conda create -n ndinf python=3.10 -y && conda activate ndinf
 
-# 2. Create a virtual env
-python -m venv .venv
-source .venv/bin/activate   # Linux/macOS
-# .venv\Scripts\activate    # Windows
+# CUDA torch（与集群同版本）
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
-# 3. Install in editable mode with dev extras
-pip install -e ".[dev]"
+# 项目本体（dev + brainomni 推理依赖）
+pip install -e ".[dev,brainomni]"
 
-# 4. Install pre-commit hooks
-pip install pre-commit
-pre-commit install
-
-# 5. Verify
-make test-unit
-make lint
+# 验证
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+python -m pytest tests/ -q -m "not slow"     # 期望 145+ passed
 ```
 
-If `make test-unit` passes, your dev env is ready.
+⚠️ torch 版本对齐是刻意决策：cu124 是集群（CentOS 7）实测可用的最高组合，
+本地同版本保证 AMP/DDP 行为一致。
 
-### What you CAN do on dev machine
-
-- ✅ Edit code
-- ✅ Run unit tests (`make test-unit`)
-- ✅ Run lint (`make lint`)
-- ✅ Generate fake data (`python -m recon.data.fake_data`)
-- ✅ View W&B dashboards (in browser)
-- ✅ Write / review docs
-
-### What you CANNOT do on dev machine
-
-- ❌ Train on real data
-- ❌ Train on real GPU
-- ❌ Decode real stories
-
-## Cluster setup
-
-### Prerequisites
-
-- SSH access to mgmt.hpcc.com (ask owner)
-- Your SSH key added to mgmt's `~/.ssh/authorized_keys`
-
-### Steps
+## 集群安装（mgmt 与计算节点共享 NFS，装一次）
 
 ```bash
-# 1. SSH into management node
-ssh your_user@mgmt.hpcc.com
-
-# 2. Clone repo (on mgmt)
-cd /home/test/reconstruction
-git clone git@github.com:<owner>/neural-decoding-infra.git
-cd neural-decoding-infra
-
-# 3. Install dependencies (in a venv)
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-
-# 4. Verify
-python -c "import torch; print(torch.cuda.is_available())"  # should be True on compute node
-```
-
-### Working on a compute node
-
-```bash
-# SSH from mgmt to a compute node
-ssh cn3
-
-# Verify GPU
-nvidia-smi
-
-# Check data access
-ls /home/test/reconstruction/mydata/derivatives/preprocessed_data/sub-01/
-
-# Run a smoke test
 cd /home/test/reconstruction/neural-decoding-infra
-python -m recon.cli.train paths=cluster train.smoke=true
+conda create -n ndinf python=3.10 -y && conda activate ndinf
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+pip install -e ".[dev,brainomni]"
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-### Network layout
+外部资产（各放各的位置，路径在 `configs/paths/cluster.yaml`）：
+- GPT-2：`/home/test/reconstruction/llm/gpt2-chinese-cluecorpussmall`
+- BrainOmni：`/home/test/reconstruction/BrainOmni/`（代码+权重，sys.path 链接，不 pip 装）
 
-See [Cluster card](../research/03-cluster-card.md).
-
-## Environment variables
-
-For W&B, set your API key:
+## 验证四件套（新环境装完必跑）
 
 ```bash
-# On cluster (after activating venv)
-export WANDB_API_KEY=<your_key>
-
-# Or put it in .env (and add .env to .gitignore!)
-echo "WANDB_API_KEY=<your_key>" > .env
+python -m pytest tests/ -q -m "not slow"        # ① 代码与依赖
+python -m recon.cli.train model=meg_model_a data=fake train.smoke=true paths=cluster  # ② 训练链路
+python -m recon.cli.preprocess stage=meg_context subject=1 stories=[1] paths=cluster  # ③ 预处理链路
+python -m recon.cli.preprocess_run status       # ④ 数据侧车覆盖率
 ```
 
-For reproducibility, optionally pin seeds:
+## 网络与环境变量
 
-```bash
-export PYTHONHASHSEED=0
-export CUBLAS_WORKSPACE_CONFIG=:4096:8
-```
-
-## Common issues
-
-| Issue | Fix |
-|---|---|
-| `ModuleNotFoundError: recon` | `pip install -e ".[dev]"` |
-| `CUDA not available` | You're on dev machine, not cluster. SSH to a compute node. |
-| `pre-commit` not running | Run `pre-commit install` once per clone |
-| `Permission denied` on cluster | Check SSH key; ask owner |
-| `wandb: ERROR ...` | Check WANDB_API_KEY env var |
-| Old Python on cluster | Use `python -m venv .venv` to get a fresh one |
-
-## See also
-
-- [Cluster card](../research/03-cluster-card.md)
-- [Standard 01: Python style](../standards/01-python-style.md)
-- [ADR-0005: No local GPU testing](../decisions/0005-no-local-gpu-test.md)
-
----
-
-Maintained by owner.
+- W&B：计算节点 `WANDB_MODE=offline`（launch 脚本默认），mgmt 上
+  `wandb login` 后 `bash scripts/sync_wandb.sh` 上传
+- push：本地依赖代理（Clash 7897）；集群直连 GitHub 可作备用推送通道
+- DDP 环境变量协议见 [Guide 05](05-launch-multi-node.md)

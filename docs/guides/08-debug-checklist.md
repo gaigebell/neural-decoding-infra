@@ -1,12 +1,27 @@
 # Guide 08: Debug checklist
 
 > **Audience**: Anyone hitting a bug. Read this before opening a long debugging session.
+> **Status**: 2026-09-12 更新——加入集群实战坑位。
 
 ---
 
 ## Philosophy
 
 > **80% of bugs are configuration errors.** Before debugging code, check config.
+
+## Tier 0: 集群实战坑位（按出现频率排序）
+
+| 症状 | 根因 | 修复 |
+|---|---|---|
+| 跨节点 `No route to host` (errno 113) | MASTER_ADDR 取了管理网 IP（`hostname -I` 第一个） | 用**主机名**（/etc/hosts 解析到万兆网）或 `MASTER_ADDR=10.0.1.x` |
+| `LexerNoViableAltException: N`（数字是 rank） | 脚本 heredoc 里 `$@` 泄漏了 rank/local_rank | build 函数内 `shift 2` 吃掉前两个参数 |
+| hydra "config directory .../recon/cli/configs" | CLI 传 `--config-path` 时按调用文件解析 | 删掉（装饰器已指定） |
+| DDP 卡死但单 rank 报错 | 一个 rank 崩了，其他等在 all_reduce | 看最早报错的那个 rank 的日志（10 分钟超时兜底） |
+| wandb 面板缺 val/lr 曲线 | 同 step 多次 `wandb.log` 丢键 | 每 epoch 合并成一次 log 调用（已修） |
+| `CUDA error: invalid configuration argument`（encode） | 全 story 一次前向超出显存 | `encode_chunk` 分块（窗口=整段，分块数值等价） |
+| 滤波后数据"全零" | 显示精度问题（fT 量级 %.4f 打不出） | 用 `%.3e` 或看 `std` |
+| `ModuleNotFoundError: deepspeed` | BrainOmni 的 vq.py 顶层 import | 推理路径用 no-op 桩（`_ensure_deepspeed_shim`），不装 deepspeed |
+| 模型输入报 dtype/尺度错 | 输入尺度 ≠ 训练分布 | brainomni 用 `x_scale=9.508e9`（默认）；其他模型查黄金 |
 
 ## Tier 1: Configuration (5 minutes)
 

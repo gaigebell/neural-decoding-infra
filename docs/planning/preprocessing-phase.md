@@ -1,8 +1,9 @@
 # 下一阶段计划：预处理管线重构与集群部署
 
-> **Status**: 2026-08-27 v2（owner 已确认 5 个问题 + 设计讨论定稿，见
-> [data-pipeline-design.md](data-pipeline-design.md)）。目标：预处理管线
-> 整合进框架 → 集群部署 → 全被试预处理 → 全被试 MEG model A 训练。
+> **Status**: ✅ **2026-09-12 完成**。Phase 1-3 全部落地：管线重构（黄金
+> 等价性验证）、集群 runner、全 12 被试预处理（707 pairs / 53 万样本）、
+> BrainOmni 集成、数据验收通过、LOSO 训练已启动。完整回顾见
+> [dev-logs/2026-09-12-milestone-preprocessing-to-loso.md](../dev-logs/2026-09-12-milestone-preprocessing-to-loso.md)。
 
 ---
 

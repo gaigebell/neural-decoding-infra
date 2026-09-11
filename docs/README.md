@@ -60,6 +60,15 @@ This documentation follows the [Diátaxis framework](https://diataxis.fr/):
 
 ### 📅 Development logs
 - [Week 0 (2026-07-28): Bootstrap](dev-logs/2026-07-28-week-00-bootstrap.md)
+- [Week 5 (2026-08-27): Cluster validation T0-T3](dev-logs/2026-08-27-week-05-cluster-validation.md)
+- [2026-08-29: BrainOmni stage + golden comparison](dev-logs/2026-08-29-brainomni-stage.md)
+- [2026-09-12: Milestone — preprocessing complete, LOSO started](dev-logs/2026-09-12-milestone-preprocessing-to-loso.md)
+
+**Planning（设计讨论与阶段计划）**
+
+- [数据管线设计讨论](planning/data-pipeline-design.md)：三层分离、业界方案、预处理边界、策略变更成本
+- [预处理阶段计划（已完成）](planning/preprocessing-phase.md)
+- [新数据集接入流程（草案）](planning/dataset-onboarding.md)
 
 ### 🔬 Research context
 - [Project overview](research/01-project-overview.md)

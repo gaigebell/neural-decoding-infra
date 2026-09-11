@@ -186,13 +186,26 @@ python -m recon.cli.decode \
 
 ## 已完成（无需重复检查）
 
-- [x] 本地 CPU：107 测试 + MEG/fMRI 真实数据训练 + 解码全链路
-- [x] 本地单卡 GPU（RTX 4060）：训练 AMP 修复、解码、回归全绿
+- [x] 本地 CPU/GPU：145+ 测试 + MEG/fMRI 真实数据训练 + 解码全链路
 - [x] 数据发现、延迟加权、对齐位移、collate 均有测试锁定
-- [x] DDP 后端选择：`nccl`（cuda）/`gloo`（cpu）已实现
-- [x] `scripts/launch_multi_node.sh`：每节点每 GPU 一个进程、
-      连续 RANK + LOCAL_RANK（2026-08-20 修复了只起 4 进程 rank 断号的
-      卡死 bug）；默认 `WANDB_MODE=offline` + `NCCL_IB_DISABLE=1`
-- [x] W&B 离线方案：`logging.wandb_mode` 配置 + `scripts/sync_wandb.sh`
-      （mgmt 端上传），`WandBLogger` 的依赖检查 bug 已修（wandb 是 core
-      依赖，不再误判为需要 data-public extra）
+- [x] DDP：后端选择、launch 脚本（RANK/LOCAL_RANK/RUN_ID/Ctrl-C trap）、
+      集群 T0-T3 全通过（8 卡 7.3×；2026-09 已扩到 6 节点 12 卡）
+- [x] W&B 离线方案 + sync 脚本 + val 曲线修复（合并 log 调用）
+- [x] 训练加固：启动检查、NaN 守卫、信号处理、run_metadata、split 层
+      （ratio/holdout/explicit）、val loop、AMP 三档
+- [x] **预处理管线 Phase 1-3**：8 个 stage（黄金等价性验证）+
+      集群 runner + 12 被试全量（707 pairs / 53 万样本）+ BrainOmni
+      集成（segments/分块 encode/x_scale 契约）
+- [x] 数据验收：覆盖率、规模、跨被试一致性（zstim bit-equal）、
+      黄金对账、健康检查全通过
+
+## 进行中 / 未完成
+
+- [ ] LOSO 训练结果验收 + decode 评估基线（CRR/CER）
+- [ ] 故事泛化实验（命令已备）
+- [ ] fMRI cube 全量预处理（0/720）
+- [ ] 监控面板（mgmt TUI：进度/GPU/损失/事件/中断）
+- [ ] 断点续训 CLI 入口（load_checkpoint 已就绪，fit 入口缺）
+- [ ] 产物版本化 `--tag`（YAGNI 延后）
+- [ ] BrainOmni 对齐头（recon/models/brainomni 占位）
+- [ ] worker 错误可见性（`|| true` 吞错，status 兜底）

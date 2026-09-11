@@ -155,7 +155,7 @@ sub-XX/
 ```bash
 # On cluster (any compute node)
 ls /home/test/reconstruction/
-ls /home/test/reconstruction/mydata/derivatives/preprocessed_data/sub-01/
+ls /home/test/reconstruction/preprocessed_data/sub-01/MEG/     # 注意：无 mydata/derivatives 前缀
 
 # On dev machine (owner only)
 ls E:/reconstruction/
@@ -164,7 +164,22 @@ ls E:/results/MEG/zresp/
 # NOT accessible: via GitHub (private data, not in repo)
 ```
 
-## 10. See also
+## 10. Verified statistics (2026-09-12, results_v2)
+
+New-pipeline dataset acceptance results:
+
+- **707 (subject, story) pairs / 532,574 samples** across 12 subjects
+  (avg 753 samples/story)
+- Subjects 4/5/6 have fewer stories (56/56/55 — raw fif gaps in the
+  BIDS release, not pipeline loss); the rest have 60
+- Cross-subject consistency: zstim is subject-independent and bit-equal
+  across subjects (verified stories 5/30/60)
+- zresp is bit-exact vs the legacy golden (E:/results); brainomni
+  segments match the golden at scale factor 9.508e9 (corr 0.9998)
+- Story 10's zresp is sparse (305/306 channels std<0.01) — a property
+  of the recording, reproduced exactly by both pipelines
+
+## 11. See also
 
 - [Project overview](01-project-overview.md) — why this data
 - [Cluster card](03-cluster-card.md) — where it lives
