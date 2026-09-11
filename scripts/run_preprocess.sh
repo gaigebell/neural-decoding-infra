@@ -78,9 +78,9 @@ trap cleanup_remote INT TERM
 for STAGE in "${STAGES[@]}"; do
     echo "=== Stage ${STAGE} ==="
     case "${STAGE}" in
-        gpt_char_features|semantic_downsample|brainomni_encode)
+        gpt_char_features|brainomni_encode)
             SUBJ_INDEP=0; W=$((GPU_WORKERS)); NODELIST=("${GPU_NODE}") ;;
-        meg_brainomni_segments|*)
+        *)
             SUBJ_INDEP=0; W=$(( ${#NODES[@]} * WORKERS_PER_NODE )); NODELIST=("${NODES[@]}") ;;
     esac
     # gpt/time_align/downsample artifacts are per-story only (subject-independent)

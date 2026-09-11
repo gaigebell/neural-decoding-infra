@@ -33,7 +33,7 @@ n_context: 5           # meg_context window
 fmri_start_row: 17     # fMRI grid offset (≈12.07 s)
 delays: [1, 2, 3, 4]
 context_len: 5         # GPT-2 char context window
-gpt_device: cpu        # cuda on a GPU node
+gpt_device: cuda        # cuda | cpu (falls back to cpu when CUDA unavailable)
 
 # BrainOmni stages (segments on CPU, encode on GPU)
 brainomni_sample_rate: 256

@@ -105,6 +105,9 @@ def extract_gpt_char_features(
     save_dir.mkdir(parents=True, exist_ok=True)
 
     chars = _story_chars(mat_path, eliminate)
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        logger.warning("CUDA not available — falling back to CPU for GPT features")
+        device = "cpu"
     tokenizer = BertTokenizer.from_pretrained(str(gpt_path))
     model = GPT2LMHeadModel.from_pretrained(str(gpt_path), output_hidden_states=True).to(device)
     model.eval()
