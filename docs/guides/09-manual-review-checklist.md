@@ -34,12 +34,16 @@
 
 ### 1.2 解码语义
 
-- [ ] [recon/decoders/beam.py](../../recon/decoders/beam.py) 的文档中列出的
-  **刻意简化**（无 WR 模型、1 char/step 对齐、`logprob + sim_ratio*cos`
-  组合得分）是否符合下一阶段目标；WR 模型移植排期（P2）。
-- [ ] `sim_ratio=0.15` 与旧配置的 `ratio=0.15` 语义不同（旧版是 nucleus
-  ratio，新版是 sim 权重）——确认这个超参含义变化是否可接受。
-- [ ] 冷启动字符集 `_COLD_START_CHARS` 是否需要换成 GPT 的 [CLS] 起始逻辑。
+> 2026-09-14 细化：本节的三个待确认项已并入
+> [planning/decode-eval-phase.md](../planning/decode-eval-phase.md) 的
+> 决策点（D1 对齐一致性、D3 范式适配、D5 效率）。核心发现：解码与训练
+> 存在 **4 步对齐偏移**（训练用 `resp_ctx[t-4]` 预测 stim[t]，decode.py
+> 用 `resp_ctx[t]`），且 1 char/step 只覆盖 1011 步 vs 真实 1586 字符——
+> 两问题耦合在"缺 WR 模型"上，方案 D1-A（onset 直接映射）为推荐解。
+
+- [ ] 对齐修复方案（D1-A onset 映射 / D1-B 移植 WR 模型）——owner 决策
+- [ ] `sim_ratio=0.15` 语义（sim 权重 vs 旧 nucleus ratio）——随 D3 重构时确认
+- [ ] 冷启动字符集——低优先级，D3 重构时顺手
 
 ### 1.3 安全与隐私（每轮提交前必查）
 

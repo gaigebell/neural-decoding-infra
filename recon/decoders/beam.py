@@ -165,19 +165,31 @@ class BeamSearchDecoder:
             brain_input: Brain signal tensor. Shape depends on the model:
                 - MEG chunked: (T, n_context, n_channels)
                 - fMRI: (T, X, Y, Z) or (T, 1, X, Y, Z)
+                - **Precomputed features**: (T, semantic_dim) — skip the
+                  brain encoder entirely (used by the aligned decode
+                  flow, where per-character features are computed
+                  externally via ``recon.decoders.alignment``).
 
         Returns:
             Decoded string (concatenation of the best beam hypothesis).
         """
         brain_input = brain_input.to(self.device)
 
-        logger.info("Step 1: batched brain encoding...")
-        brain_features = self._encode_brain(brain_input)  # (T, 768)
-        n_steps = brain_features.shape[0]
-        logger.info("Encoded %d time steps, semantic dim=%d", n_steps, brain_features.shape[-1])
+        if brain_input.ndim == 2:
+            # Precomputed per-step semantic features (T, semantic_dim)
+            brain_features = brain_input
+            n_steps = brain_features.shape[0]
+            logger.info("Using precomputed features: %d steps, dim=%d", n_steps, brain_features.shape[-1])
+        else:
+            logger.info("Step 1: batched brain encoding...")
+            brain_features = self._encode_brain(brain_input)  # (T, 768)
+            n_steps = brain_features.shape[0]
+            logger.info("Encoded %d time steps, semantic dim=%d", n_steps, brain_features.shape[-1])
 
         beam = [Hypothesis()]
-        for t in tqdm(range(min(n_steps, self.config.max_chars)), desc="Decoding", leave=False):
+        # max_chars <= 0 means "no cap" (decode all n_steps)
+        cap = self.config.max_chars if self.config.max_chars > 0 else n_steps
+        for t in tqdm(range(min(n_steps, cap)), desc="Decoding", leave=False):
             pool: list[tuple[float, Hypothesis]] = []
             for hyp in beam:
                 # 1. Nucleus proposal from this hypothesis's recent context

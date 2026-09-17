@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Decode & evaluation P0** (aligned decode flow, plan D1-D7):
+  - `recon/decoders/alignment.py` — D1-A: char onset → grid row mapping
+    (`round((onset-12)/0.4)`), out-of-grid dropping, `decode_input_rows`
+    anchor shift so decode inputs match training exactly
+  - `recon/data/reference.py` — reference text rebuilt from `.mat`
+    (legacy tokenization incl. digit grouping + eliminate_data)
+  - `decode.py` aligned rewrite: batched per-character brain encoding,
+    `--length` override (LengthPredictor insertion point, D1-B),
+    `--save-reference`; `decode_batch.py` — test-set auto-discovery from
+    run_metadata (holdout/ratio/explicit) + per-story references
+  - `eval.py` — dual 口径 (full + Chinese-only CRR/CER/top5), BERT
+    semantic similarity (bert-base-chinese, aligned with legacy
+    SentenceBERT), GPT-2 fluency perplexity, length/unique ratio,
+    `--metrics` subset, per-subject breakdown
+  - beam: precomputed-feature input (2D); `max_chars<=0` = no cap
+  - docs: decode-eval plan v2 (approved), guides/11 LLM inference
+    optimization tutorial, checklist 1.2 update
+  - 156 tests pass; real-data smoke verified (reference exact)
+
 
 - **Preprocessing pipeline Phase 1** (`recon/preprocessing/`):
   - `common.py` — legacy-verbatim numerical kernels (zscore, lanczos,
